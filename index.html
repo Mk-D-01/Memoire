@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Memoire — Your Memory Book</title>
+  <meta name="description" content="A beautiful Pinterest-style photo collage that auto-arranges your memories like a memory book." />
+
+  <!-- PWA / Android -->
+  <meta name="theme-color" content="#0e0c15" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Mémoire" />
+  <link rel="manifest" href="manifest.json" />
+
+  <!-- Performance hints -->
+  <link rel="dns-prefetch" href="https://fonts.googleapis.com" />
+  <link rel="dns-prefetch" href="https://www.googleapis.com" />
+  <link rel="dns-prefetch" href="https://lh3.googleusercontent.com" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;500;600&family=Dancing+Script:wght@600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Ambient background particles -->
+  <div class="ambient-bg" id="ambientBg"></div>
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-inner">
+      <div class="logo">
+        <span class="logo-icon">📷</span>
+        <span class="logo-text">Mémoire</span>
+      </div>
+      <p class="logo-subtitle">Your personal memory book</p>
+      <div class="header-actions">
+        <button class="btn btn-ghost" id="btnClearAll" title="Clear all photos">🗑 Clear All</button>
+        <button class="btn btn-ghost" id="btnShuffle" title="Re-arrange photos">🔀 Shuffle</button>
+        <button class="btn btn-drive" id="btnDriveImport" title="Import from Google Drive">
+          <svg class="drive-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M4.5 20L9 12L4.5 4H8.5L13 12L8.5 20H4.5Z" fill="#4285F4"/>
+            <path d="M15.5 20L20 12L15.5 4H11.5L16 12L11.5 20H15.5Z" fill="#FBBC05"/>
+            <path d="M4.5 20H15.5L13 16H7L4.5 20Z" fill="#34A853"/>
+          </svg>
+          Drive
+        </button>
+        <label class="btn btn-primary" for="fileInput" id="uploadLabel">
+          <span>✦ Add Memories</span>
+          <input type="file" id="fileInput" accept="image/*" multiple hidden />
+        </label>
+      </div>
+    </div>
+  </header>
+
+  <!-- Drop Zone Overlay -->
+  <div class="drop-overlay" id="dropOverlay">
+    <div class="drop-box">
+      <div class="drop-icon">🖼️</div>
+      <p class="drop-text">Drop your memories here</p>
+    </div>
+  </div>
+
+  <!-- Empty state -->
+  <section class="empty-state" id="emptyState">
+    <div class="empty-inner">
+      <div class="empty-illustration">
+        <div class="polaroid-stack">
+          <div class="polaroid p1">📸</div>
+          <div class="polaroid p2">🌸</div>
+          <div class="polaroid p3">🌅</div>
+        </div>
+      </div>
+      <h1 class="empty-title">Create Your Memory Book</h1>
+      <p class="empty-sub">Upload your photos and watch them arrange beautifully, just like a Pinterest board filled with your favourite moments.</p>
+      <label class="btn btn-hero" for="fileInput">
+        <span class="btn-icon">✦</span> Upload Your Memories
+      </label>
+      <p class="empty-hint">or drag &amp; drop photos anywhere · or import from <button class="link-btn" id="emptyDriveBtn">Google Drive</button></p>
+    </div>
+  </section>
+
+  <!-- Google Drive Import Modal -->
+  <div class="drive-modal" id="driveModal" role="dialog" aria-modal="true" aria-label="Import from Google Drive">
+    <div class="drive-modal-box">
+      <div class="drive-modal-header">
+        <div class="drive-modal-title">
+          <svg class="drive-icon-lg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M4.5 20L9 12L4.5 4H8.5L13 12L8.5 20H4.5Z" fill="#4285F4"/>
+            <path d="M15.5 20L20 12L15.5 4H11.5L16 12L11.5 20H15.5Z" fill="#FBBC05"/>
+            <path d="M4.5 20H15.5L13 16H7L4.5 20Z" fill="#34A853"/>
+          </svg>
+          Import from Google Drive
+        </div>
+        <button class="drive-modal-close" id="driveModalClose" aria-label="Close">✕</button>
+      </div>
+
+      <div class="drive-info-box">
+        <p class="drive-info-title">📌 How it works</p>
+        <ul class="drive-info-list">
+          <li>Paste one or more Drive links — <strong>files</strong> or <strong>folders</strong> (one per line)</li>
+          <li>The app <strong>auto-detects</strong> whether each link is a file or folder</li>
+          <li>Folders: all images inside are imported automatically (requires API key below)</li>
+          <li>Files &amp; folders must be shared as <strong>"Anyone with the link"</strong></li>
+        </ul>
+      </div>
+
+      <!-- API Key section (needed for folder listing) -->
+      <div class="drive-apikey-section" id="driveApiKeySection">
+        <div class="drive-apikey-header" id="driveApiKeyToggle">
+          <span class="drive-apikey-label">🔑 Google Drive API Key <span class="drive-apikey-badge" id="apiKeyBadge">not set</span></span>
+          <span class="drive-apikey-chevron" id="apiKeyChevron">▸</span>
+        </div>
+        <div class="drive-apikey-body" id="driveApiKeyBody">
+          <p class="drive-apikey-hint">Required only for <strong>folder</strong> imports. Get a free key at <a href="https://console.cloud.google.com/" target="_blank" rel="noopener" class="drive-ext-link">Google Cloud Console</a> → APIs &amp; Services → Credentials.</p>
+          <div class="drive-apikey-row">
+            <input type="password" class="drive-apikey-input" id="driveApiKeyInput" placeholder="AIza…" autocomplete="off" />
+            <button class="drive-apikey-save" id="driveApiKeySave">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- URL textarea with live detect badge -->
+      <div class="drive-input-wrap">
+        <textarea
+          class="drive-url-input"
+          id="driveUrlInput"
+          placeholder="Paste Google Drive link(s) here, one per line…
+
+https://drive.google.com/drive/folders/1XYZ…   ← folder (imports all images)
+https://drive.google.com/file/d/1ABC…/view      ← single file"
+          rows="5"
+        ></textarea>
+        <div class="drive-detect-bar" id="driveDetectBar"></div>
+      </div>
+
+      <div class="drive-status" id="driveStatus"></div>
+
+      <div class="drive-modal-actions">
+        <button class="btn btn-ghost" id="driveModalCancel">Cancel</button>
+        <button class="btn btn-drive-import" id="driveImportBtn">Import Photos →</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Photo Stats Bar -->
+  <div class="stats-bar" id="statsBar">
+    <span class="stat-count" id="photoCount">0 memories</span>
+    <div class="stat-divider"></div>
+    <span class="stat-label" id="layoutLabel">Masonry Layout</span>
+    <div class="layout-switcher">
+      <button class="layout-btn active" data-layout="masonry" title="Masonry">▦</button>
+      <button class="layout-btn" data-layout="grid" title="Grid">⊞</button>
+      <button class="layout-btn" data-layout="scattered" title="Scattered">❋</button>
+    </div>
+    <div class="stat-divider"></div>
+    <button class="btn btn-captions" id="btnViewCaptions" title="View all captions">💬 Captions</button>
+  </div>
+
+  <!-- Collage Container -->
+  <main class="collage-wrapper" id="collageWrapper">
+    <div class="collage-grid masonry" id="collageGrid"></div>
+  </main>
+
+  <!-- View All Captions Modal -->
+  <div class="captions-modal" id="captionsModal" role="dialog" aria-modal="true" aria-label="All Captions">
+    <div class="captions-modal-box">
+      <div class="captions-modal-header">
+        <div class="captions-modal-title"><span>💬</span> All Captions</div>
+        <button class="captions-modal-close" id="captionsModalClose" aria-label="Close">✕</button>
+      </div>
+      <div class="captions-search">
+        <input class="captions-search-input" id="captionsSearchInput" placeholder="Search captions…" type="search" />
+      </div>
+      <div class="captions-stats" id="captionsStats"></div>
+      <div class="captions-list" id="captionsList"></div>
+    </div>
+  </div>
+
+  <!-- Lightbox -->
+  <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Photo viewer">
+    <button class="lightbox-close" id="lightboxClose" aria-label="Close">✕</button>
+    <button class="lightbox-nav prev" id="lightboxPrev" aria-label="Previous photo">‹</button>
+    <button class="lightbox-nav next" id="lightboxNext" aria-label="Next photo">›</button>
+    <div class="lightbox-content">
+      <div class="lightbox-polaroid">
+        <img class="lightbox-img" id="lightboxImg" src="" alt="" />
+        <div class="lightbox-meta">
+          <input class="lightbox-caption" id="lightboxCaption" placeholder="Add a caption…" maxlength="100" />
+          <span class="lightbox-date" id="lightboxDate"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast notifications -->
+  <div class="toast-container" id="toastContainer" role="status" aria-live="polite"></div>
+
+  <script src="collage.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
