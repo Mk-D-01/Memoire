@@ -1,0 +1,24 @@
+# Mémoire — Cursor Rules & AI Agent Instructions
+
+You are working on **Mémoire**, a Pinterest-inspired, client-side memory book & photo collage web application.
+
+## Core Technical Constraints
+1. **Zero External Runtime Dependencies**: Pure Vanilla ES6+, CSS3, and Semantic HTML5. Do NOT install npm packages, node bundlers, or frameworks (React/Vue/Angular/Vite/Webpack) unless explicitly instructed by the user.
+2. **Local-First & Offline Storage**:
+   - High-res images are stored in IndexedDB (`memoireDB`, store `photos`).
+   - Metadata is stored in `localStorage` (`memoire_meta`).
+   - Tab layout/scroll progress is stored in `sessionStorage` (`memoire_session`).
+   - Always call `saveToStorage()` after modifying the `photos` array.
+3. **Layout & Polaroid Engine**:
+   - Layout is a unified Pinterest-style **Masonry Waterfall** (`.collage-grid.masonry`).
+   - Polaroid frequency is kept at **~15%** (`rng < 0.15`) as rare, special visual accents.
+   - Polaroids have minimal 4px framing and compact 28px chins so the photo covers >85% of the card.
+4. **Performance Rules**:
+   - Always downscale large uploaded images via HTML5 Canvas (≤1600px, 88% JPEG).
+   - Use `DocumentFragment` for batch DOM mutations in `collage.js`.
+   - Disconnect previous `IntersectionObserver` instances before re-rendering the collage.
+5. **Auto-Caption Engine**:
+   - New images automatically receive evocative captions via `generateAutoCaption()` (poetic quotes, date titles, or clean filenames).
+   - Keep the lightbox caption suggestion button minimal (`✨` icon only).
+6. **Detailed Architecture**:
+   - Refer to `PROJECT_CONTEXT.md` and `PROJECT_LOG.md` for full data models, DOM IDs, and changelog history.

@@ -29,16 +29,18 @@ Built with **zero external runtime dependencies**, it requires no Node.js build 
 
 ## ✨ Features at a Glance
 
-### 🎨 Dynamic Layout Modes
-- **Masonry View**: Multi-column Pinterest-style waterfall that organically arranges portrait and landscape photos.
-- **Grid View**: Clean, balanced modern grid for uniform viewing.
-- **Scattered Scrapbook View**: Playful rotations, organic micro-tilts, polaroid borders, and decorative stickers (`🌸`, `✨`, `💫`, `🎉`).
+### 🎨 Fluid Masonry Waterfall Layout
+- **Masonry Waterfall**: Multi-column Pinterest-style waterfall that organically arranges portrait and landscape photos with smooth responsive reflow.
+- **Maximized Photo Polaroids**: ~15% accent polaroids featuring enlarged photo coverage (>85%) with sleek 4px framing, cursive captions, and stamped dates.
 - **One-Click Shuffle**: Instantly randomize and restyle photo arrangements for a fresh perspective.
 
-### 🖼️ Interactive Lightbox & Captions Studio
+### 🖼️ Interactive Lightbox, Captions Studio & Polaroid Exporter
+- **High-Res Polaroid Downloader**: Download individual polaroid snapshots as authentic PNG images complete with white borders, cursive captions, and stamped dates.
+- **Intelligent Auto-Captioning**: Automatically suggests poetic quotes, date-based memory stamps (e.g. `Captured in Aug 2026`, `Moments from August '26`), or atmospheric descriptions for newly uploaded memories.
+- **Interactive Caption Suggestion**: Single-click `✨` suggestion button in the Lightbox viewer to cycle through aesthetic captions in real-time.
 - **Polaroid-Inspired Viewer**: Immersive full-screen lightbox with date metadata and inline caption editing.
 - **Touch & Gesture Navigation**: Full swipe gestures on mobile (`TouchEvents`) and keyboard navigation (`←` / `→` / `Esc`).
-- **All Captions Search Modal**: Filter and search through all your photo captions with real-time text matching and direct jump-to-photo links.
+- **All Captions Search Modal**: Filter, search, and bulk auto-caption all photo captions with real-time text matching and direct jump-to-photo links.
 
 ### ⚡ Client-Side Performance & Optimization
 - **Smart Image Compression**: HTML5 Canvas auto-downscales large images (up to 1600px max dimension with 88% JPEG quality) to conserve memory and maintain fast rendering.
@@ -80,13 +82,16 @@ Built with **zero external runtime dependencies**, it requires no Node.js build 
 
 ```text
 Memoire/
-├── index.html        # Main HTML entry point, semantic DOM structure & modals
-├── style.css         # Design tokens, themes, layout modes, animations & media queries
-├── app.js            # Core controller: storage, image compression, events, Drive import
-├── collage.js        # Layout engine: masonry/grid/scattered builder & lazy-load observer
-├── drive-sync.js     # Google Identity Services (GIS) & appDataFolder cloud backup module
-├── manifest.json     # PWA configuration, theme colors, icons & standalone settings
-└── README.md         # Documentation & repository showcase
+├── index.html          # Main HTML entry point, semantic DOM structure & modals
+├── style.css           # Design tokens, themes, layout modes, animations & media queries
+├── app.js              # Core controller: storage, image compression, events, Drive import
+├── collage.js          # Layout engine: masonry builder, polaroids & lazy loading
+├── drive-sync.js       # Google Identity Services (GIS) & appDataFolder cloud backup module
+├── manifest.json       # PWA configuration, theme colors, icons & standalone settings
+├── PROJECT_CONTEXT.md  # Comprehensive AI agent architecture, state & coding rules
+├── PROJECT_LOG.md      # Historical development milestones & changelog
+├── .cursorrules        # Cursor & AI agent environment configuration
+└── README.md           # Documentation & repository showcase
 ```
 
 ---

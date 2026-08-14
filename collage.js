@@ -44,14 +44,16 @@ function seededRandom(str) {
 
 /**
  * Determine card style variant based on index + photo id.
- * Polaroid: random ~20% of cards (stable per photo id).
+ * Polaroid: ~15% of cards (reduced by >80% to serve as rare, special visual accents).
  * Sticker: every 5th card.
  */
 function getCardVariant(index, photoId) {
   const rng = seededRandom(photoId || String(index));
+  const isPolaroid = rng < 0.15;
   return {
-    isPolaroid : rng < 0.20,           // ~1 in 5
+    isPolaroid : isPolaroid,
     hasSticker : (index % 5 === 3),
+    hasTape    : isPolaroid && (rng > 0.08),
     sticker    : STICKERS[index % STICKERS.length],
     tilt       : TILTS[index % TILTS.length],
     animDelay  : `${Math.min(index * 0.04, 0.8)}s`,
@@ -61,8 +63,8 @@ function getCardVariant(index, photoId) {
 /**
  * Build a single photo card DOM element.
  */
-function buildPhotoCard(photo, index) {
-  const variant = getCardVariant(index, photo.id);
+function buildPhotoCard(photo, index, layout = 'masonry') {
+  const variant = getCardVariant(index, photo.id, layout);
   const card = document.createElement('div');
   card.className = 'photo-card';
   card.dataset.id = photo.id;
@@ -70,6 +72,11 @@ function buildPhotoCard(photo, index) {
   card.style.setProperty('--tilt', `${variant.tilt}deg`);
 
   if (variant.isPolaroid) card.classList.add('polaroid-style');
+  if (variant.hasTape) {
+    const tape = document.createElement('div');
+    tape.className = 'polaroid-tape';
+    card.appendChild(tape);
+  }
   if (variant.hasSticker) {
     card.classList.add('has-sticker');
     card.dataset.sticker = variant.sticker;
@@ -77,7 +84,7 @@ function buildPhotoCard(photo, index) {
 
   const img = document.createElement('img');
   img.alt = photo.caption || `Memory ${index + 1}`;
-  img.style.maxHeight = getMaxHeight(index);
+  img.style.maxHeight = getMaxHeight(index, variant.isPolaroid);
   // Use IntersectionObserver lazy loading: first few cards load eagerly
   if (index < 6) {
     img.src = photo.dataUrl;
@@ -87,7 +94,7 @@ function buildPhotoCard(photo, index) {
     getLazyObserver().observe(img);
   }
 
-  // ── Always-visible caption strip ──────────────────────────────────
+  // ── Always-visible caption strip (standard cards) ──────────────────
   const captionBar = document.createElement('div');
   captionBar.className = 'photo-card-caption-bar';
   if (!photo.caption) captionBar.dataset.empty = 'true';
@@ -113,12 +120,19 @@ function buildPhotoCard(photo, index) {
   editBtn.textContent = '✏ Caption';
   editBtn.dataset.action = 'open';
 
+  const downloadBtn = document.createElement('button');
+  downloadBtn.className = 'card-btn download';
+  downloadBtn.textContent = '📥';
+  downloadBtn.title = 'Download Polaroid';
+  downloadBtn.dataset.action = 'download';
+
   const deleteBtn = document.createElement('button');
   deleteBtn.className = 'card-btn delete';
   deleteBtn.textContent = '🗑';
   deleteBtn.dataset.action = 'delete';
 
   actions.appendChild(editBtn);
+  actions.appendChild(downloadBtn);
   actions.appendChild(deleteBtn);
   overlay.appendChild(overlayCaption);
   overlay.appendChild(actions);
@@ -127,21 +141,46 @@ function buildPhotoCard(photo, index) {
   card.appendChild(captionBar);
   card.appendChild(overlay);
 
+  // ── Polaroid Chin Footer with Full Data ─────────────────────────────
   if (variant.isPolaroid) {
+    const polaroidFooter = document.createElement('div');
+    polaroidFooter.className = 'polaroid-footer';
+
     const label = document.createElement('div');
-    label.className = 'polaroid-label';
-    label.textContent = photo.caption || formatDate(photo.addedAt);
-    card.appendChild(label);
+    label.className = 'polaroid-label' + (photo.caption ? '' : ' empty-caption');
+    label.textContent = photo.caption || `Memory #${index + 1}`;
+
+    const meta = document.createElement('div');
+    meta.className = 'polaroid-meta';
+
+    const dateSpan = document.createElement('span');
+    dateSpan.className = 'polaroid-date';
+    dateSpan.textContent = formatDate(photo.addedAt || Date.now());
+
+    const badgeSpan = document.createElement('span');
+    badgeSpan.className = 'polaroid-badge';
+    badgeSpan.textContent = `#${String(index + 1).padStart(2, '0')}`;
+
+    meta.appendChild(dateSpan);
+    meta.appendChild(badgeSpan);
+
+    polaroidFooter.appendChild(label);
+    polaroidFooter.appendChild(meta);
+    card.appendChild(polaroidFooter);
   }
 
   return card;
 }
 
 /**
- * Vary image heights for natural masonry feel.
+ * Compact image heights for natural masonry feel without oversized polaroids.
  */
-function getMaxHeight(index) {
-  const heights = ['380px', '260px', '320px', '480px', '200px', '340px', '290px'];
+function getMaxHeight(index, isPolaroid = false) {
+  if (isPolaroid) {
+    const polaroidHeights = ['210px', '170px', '200px', '240px', '160px', '210px', '180px'];
+    return polaroidHeights[index % polaroidHeights.length];
+  }
+  const heights = ['240px', '190px', '220px', '270px', '175px', '230px', '205px'];
   return heights[index % heights.length];
 }
 
@@ -157,7 +196,7 @@ function renderCollage(photos, container, layout = 'masonry') {
   }
 
   container.innerHTML = '';
-  container.className = `collage-grid ${layout}`;
+  container.className = 'collage-grid masonry';
 
   const frag = document.createDocumentFragment();
   photos.forEach((photo, index) => {

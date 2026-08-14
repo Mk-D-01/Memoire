@@ -31,7 +31,6 @@ const collageWrapper  = document.getElementById('collageWrapper');
 const emptyState      = document.getElementById('emptyState');
 const statsBar        = document.getElementById('statsBar');
 const photoCount      = document.getElementById('photoCount');
-const layoutLabel     = document.getElementById('layoutLabel');
 const dropOverlay     = document.getElementById('dropOverlay');
 const lightbox        = document.getElementById('lightbox');
 const lightboxImg     = document.getElementById('lightboxImg');
@@ -59,12 +58,15 @@ const driveApiKeyInput   = document.getElementById('driveApiKeyInput');
 const driveApiKeySave    = document.getElementById('driveApiKeySave');
 const apiKeyBadge        = document.getElementById('apiKeyBadge');
 const driveDetectBar     = document.getElementById('driveDetectBar');
-// Captions modal
-const captionsModal      = document.getElementById('captionsModal');
-const captionsModalClose = document.getElementById('captionsModalClose');
-const captionsList       = document.getElementById('captionsList');
-const captionsSearchInput= document.getElementById('captionsSearchInput');
-const captionsStats      = document.getElementById('captionsStats');
+// Captions modal & Suggest & Download
+const captionsModal       = document.getElementById('captionsModal');
+const captionsModalClose  = document.getElementById('captionsModalClose');
+const captionsList        = document.getElementById('captionsList');
+const captionsSearchInput = document.getElementById('captionsSearchInput');
+const captionsStats       = document.getElementById('captionsStats');
+const btnAutoCaptionAll   = document.getElementById('btnAutoCaptionAll');
+const lightboxSuggestBtn  = document.getElementById('lightboxSuggestBtn');
+const lightboxDownloadBtn = document.getElementById('lightboxDownloadBtn');
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', async () => {
@@ -118,14 +120,7 @@ function restoreSession() {
     const raw = sessionStorage.getItem(LS_SESSION_KEY);
     if (!raw) return;
     const sess = JSON.parse(raw);
-    if (sess.layout && ['masonry', 'grid', 'scattered'].includes(sess.layout)) {
-      currentLayout = sess.layout;
-      // Update active layout button immediately
-      document.querySelectorAll('.layout-btn').forEach(b => {
-        b.classList.toggle('active', b.dataset.layout === currentLayout);
-      });
-      updateLayoutLabel();
-    }
+    currentLayout = 'masonry';
     // Restore scroll after first paint
     if (sess.scrollY > 0) {
       requestAnimationFrame(() => window.scrollTo(0, sess.scrollY));
@@ -305,14 +300,256 @@ function renderUI() {
   collageWrapper.style.display = hasPhotos ? '' : 'none';
   if (hasPhotos) {
     photoCount.textContent = `${photos.length} ${photos.length === 1 ? 'memory' : 'memories'}`;
-    renderCollage(photos, collageGrid, currentLayout);
+    renderCollage(photos, collageGrid, 'masonry');
     bindCardEvents();
   }
 }
 
-function updateLayoutLabel() {
-  const labels = { masonry: 'Masonry Layout', grid: 'Grid Layout', scattered: 'Scattered Layout' };
-  layoutLabel.textContent = labels[currentLayout] || 'Layout';
+// ─── Auto-Caption & Memory Quotes Engine ──────────────────────────────────────
+const MEMORY_QUOTES = [
+  "Little pockets of peace ✨",
+  "Sunlit daydream",
+  "Forever etched in light",
+  "Laughter trapped in amber",
+  "The poetry of ordinary days",
+  "A sweet slice of life",
+  "Chasing golden horizons",
+  "Soft whispers of time",
+  "Where the heart wanders",
+  "Captured in a fleeting second 🌸",
+  "Golden hour & good vibes",
+  "Wild hearts & quiet moments",
+  "Collecting moments, not things",
+  "Somewhere between dream & dusk",
+  "In the warm embrace of memory",
+  "Sun-kissed & unforgettable",
+  "A tiny piece of eternity",
+  "Wander often, wonder always 💫",
+  "Lost in the beauty of now",
+  "Magic in the stillness",
+  "A gentle pause in time",
+  "Vintage soul, modern light",
+  "Wrapped in warm sunshine",
+  "Echoes of happy laughter",
+  "Moments that make you smile",
+  "Pure bliss & simple joys",
+  "A chapter to remember ✨",
+  "Treasured little things",
+  "Stars in our eyes",
+  "Dancing through the breeze 🍃",
+  "A heartbeat caught on film",
+  "Radiant like afternoon light",
+  "Unwritten stories & quiet roads",
+  "The art of living slowly",
+  "Sunsets and fond memories",
+  "Glimpses of wonder ✨"
+];
+
+const ATMOSPHERIC_DESCRIPTIONS = [
+  "Golden hour tranquility",
+  "Summer glow & gentle breezes",
+  "Morning haze & quiet dreams",
+  "Starlit evening stillness",
+  "Ocean breeze & sun-warmed sand",
+  "Mountain air & open skies",
+  "Coffee aroma & slow mornings",
+  "Soft shadows & warm light",
+  "City lights & twilight wandering",
+  "Cozy moments in the sun"
+];
+
+function formatCleanFilename(name) {
+  if (!name) return '';
+  let clean = name.replace(/\.[^.]+$/, '');
+  // Skip generic camera/download/hash names
+  if (/^(img|pxl|dsc|dscn|photo|image|scan|screenshot|pic|download|file)[_-]?\d*$/i.test(clean)) return '';
+  if (/^[0-9a-f]{8,}(-[0-9a-f]{4,})*$/i.test(clean)) return '';
+  clean = clean.replace(/[_\-.]+/g, ' ').trim();
+  clean = clean.split(' ').filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  return clean.length > 2 && clean.length < 50 ? clean : '';
+}
+
+function generateAutoCaption(fileOrName = '', timestamp = Date.now()) {
+  const nameStr = typeof fileOrName === 'string' ? fileOrName : fileOrName?.name || '';
+  const clean = formatCleanFilename(nameStr);
+  if (clean) return clean;
+
+  const date = new Date(timestamp || Date.now());
+  const month = date.toLocaleDateString('en-US', { month: 'short' });
+  const year = date.getFullYear();
+  const day = date.getDate();
+
+  const choice = Math.random();
+  if (choice < 0.45) {
+    return MEMORY_QUOTES[Math.floor(Math.random() * MEMORY_QUOTES.length)];
+  } else if (choice < 0.75) {
+    return ATMOSPHERIC_DESCRIPTIONS[Math.floor(Math.random() * ATMOSPHERIC_DESCRIPTIONS.length)];
+  } else {
+    const dateStyles = [
+      `Captured in ${month} ${year}`,
+      `${month} ${day}, ${year}`,
+      `Moments from ${month} '${String(year).slice(2)}`,
+      `Treasured · ${month} ${year}`,
+      `A glimpse of ${month} ${year} ✨`
+    ];
+    return dateStyles[Math.floor(Math.random() * dateStyles.length)];
+  }
+}
+
+function getRandomQuote() {
+  const all = [...MEMORY_QUOTES, ...ATMOSPHERIC_DESCRIPTIONS];
+  return all[Math.floor(Math.random() * all.length)];
+}
+
+function suggestCaptionForActivePhoto() {
+  if (!photos[currentIndex]) return;
+  const quote = getRandomQuote();
+  lightboxCaption.value = quote;
+  photos[currentIndex].caption = quote;
+  saveToStorage();
+
+  const card = collageGrid.querySelector(`[data-id="${photos[currentIndex].id}"]`);
+  if (card) {
+    const bar = card.querySelector('.photo-card-caption-bar');
+    if (bar) {
+      const captionEl = bar.querySelector('.card-caption');
+      if (captionEl) captionEl.textContent = quote;
+      delete bar.dataset.empty;
+    }
+    const overlayCaption = card.querySelector('.overlay-caption');
+    if (overlayCaption) overlayCaption.textContent = quote;
+    const labelEl = card.querySelector('.polaroid-label');
+    if (labelEl) {
+      labelEl.textContent = quote;
+      labelEl.classList.remove('empty-caption');
+    }
+  }
+  showToast('✨ Caption suggested!');
+}
+
+/**
+ * Render and download an authentic high-resolution Polaroid card with photo,
+ * vintage frame, handwritten cursive caption, date stamp, and index badge.
+ */
+async function downloadPolaroidCard(photoIndex) {
+  const photo = photos[photoIndex];
+  if (!photo) return;
+
+  showToast('⏳ Generating Polaroid download…', 1400);
+
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+
+  await new Promise((resolve) => {
+    img.onload = resolve;
+    img.onerror = () => {
+      const fallback = new Image();
+      fallback.onload = resolve;
+      fallback.onerror = resolve;
+      fallback.src = photo.dataUrl;
+    };
+    img.src = photo.dataUrl;
+  });
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  const photoW = img.naturalWidth || img.width || 800;
+  const photoH = img.naturalHeight || img.height || 600;
+
+  // Authentic Polaroid proportions
+  const borderX = Math.max(24, Math.round(photoW * 0.05));
+  const borderTop = Math.max(24, Math.round(photoW * 0.05));
+  const chinBottom = Math.max(90, Math.round(photoW * 0.18));
+
+  const canvasW = photoW + borderX * 2;
+  const canvasH = photoH + borderTop + chinBottom;
+
+  canvas.width = canvasW;
+  canvas.height = canvasH;
+
+  // 1. Vintage polaroid paper background
+  const paperGrad = ctx.createLinearGradient(0, 0, 0, canvasH);
+  paperGrad.addColorStop(0, '#fefdfa');
+  paperGrad.addColorStop(1, '#f6f3eb');
+  ctx.fillStyle = paperGrad;
+  ctx.fillRect(0, 0, canvasW, canvasH);
+
+  // 2. Subtle outer border
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.07)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(1, 1, canvasW - 2, canvasH - 2);
+
+  // 3. Photo drawing
+  ctx.drawImage(img, borderX, borderTop, photoW, photoH);
+
+  // 4. Inner photo border
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(borderX, borderTop, photoW, photoH);
+
+  // 5. Handwritten cursive caption
+  const captionText = photo.caption || `Memory #${photoIndex + 1}`;
+  const fontSize = Math.max(24, Math.round(photoW * 0.048));
+  ctx.font = `600 ${fontSize}px "Dancing Script", cursive, "Playfair Display", serif`;
+  ctx.fillStyle = '#2b2538';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  const captionY = photoH + borderTop + (chinBottom * 0.42);
+  ctx.fillText(captionText, canvasW / 2, captionY, photoW - 20);
+
+  // 6. Date stamp & index badge subline
+  const dateText = formatDate(photo.addedAt || Date.now()).toUpperCase();
+  const badgeText = `#${String(photoIndex + 1).padStart(2, '0')}`;
+  const metaFontSize = Math.max(12, Math.round(fontSize * 0.42));
+  ctx.font = `600 ${metaFontSize}px "Inter", system-ui, sans-serif`;
+  ctx.fillStyle = '#8c839f';
+
+  const metaY = photoH + borderTop + (chinBottom * 0.78);
+  ctx.textAlign = 'left';
+  ctx.fillText(dateText, borderX + 4, metaY);
+
+  ctx.textAlign = 'right';
+  ctx.fillText(badgeText, canvasW - borderX - 4, metaY);
+
+  // 7. Trigger download
+  try {
+    const dataUrl = canvas.toDataURL('image/png');
+    const link = document.createElement('a');
+    const safeTitle = (photo.caption || `memory-${photoIndex + 1}`)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'memory';
+    link.download = `memoire-polaroid-${safeTitle}.png`;
+    link.href = dataUrl;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast('✅ Polaroid downloaded!');
+  } catch (e) {
+    showToast('⚠ Download error');
+  }
+}
+
+function autoCaptionEmptyMemories() {
+  if (!photos.length) { showToast('⚠ No memories to caption'); return; }
+  let count = 0;
+  photos.forEach((photo, idx) => {
+    if (!photo.caption || photo.caption.startsWith('Memory #')) {
+      photo.caption = generateAutoCaption('', photo.addedAt || Date.now());
+      count++;
+    }
+  });
+
+  if (count > 0) {
+    saveToStorage();
+    renderUI();
+    renderCaptionsList(captionsSearchInput.value);
+    showToast(`✨ Auto-captioned ${count} ${count === 1 ? 'memory' : 'memories'}!`);
+  } else {
+    showToast('✦ All memories already have captions!');
+  }
 }
 
 // ─── File Handling ────────────────────────────────────────────────────────────
@@ -327,10 +564,11 @@ async function processFiles(files) {
 
   results.forEach((result, i) => {
     if (result.status === 'fulfilled') {
+      const file = imageFiles[i];
       photos.push({
         id     : `photo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
         dataUrl: result.value,
-        caption: '',
+        caption: generateAutoCaption(file, Date.now()),
         addedAt: Date.now(),
       });
       loaded++;
@@ -407,19 +645,6 @@ function bindEvents() {
     if (e.key === 'Escape' && captionsModal.classList.contains('active')) closeCaptionsModal();
   });
 
-  // Layout switcher
-  document.querySelectorAll('.layout-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.layout-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      currentLayout = btn.dataset.layout;
-      updateLayoutLabel();
-      renderUI();
-      saveSession();
-      showToast(`Layout: ${btn.title}`);
-    });
-  });
-
   btnShuffle.addEventListener('click', () => {
     if (!photos.length) return;
     shuffleArray(photos);
@@ -432,6 +657,22 @@ function bindEvents() {
   captionsModalClose.addEventListener('click', closeCaptionsModal);
   captionsModal.addEventListener('click', e => { if (e.target === captionsModal) closeCaptionsModal(); });
   captionsSearchInput.addEventListener('input', () => renderCaptionsList(captionsSearchInput.value));
+
+  if (btnAutoCaptionAll) {
+    btnAutoCaptionAll.addEventListener('click', autoCaptionEmptyMemories);
+  }
+  if (lightboxSuggestBtn) {
+    lightboxSuggestBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      suggestCaptionForActivePhoto();
+    });
+  }
+  if (lightboxDownloadBtn) {
+    lightboxDownloadBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      downloadPolaroidCard(currentIndex);
+    });
+  }
 
   btnClearAll.addEventListener('click', async () => {
     if (!photos.length) return;
@@ -476,13 +717,15 @@ function bindCardEvents() {
 }
 
 function handleCardClick(e) {
-  const deleteBtn = e.target.closest('[data-action="delete"]');
-  const card      = e.target.closest('.photo-card');
+  const deleteBtn   = e.target.closest('[data-action="delete"]');
+  const downloadBtn = e.target.closest('[data-action="download"]');
+  const card        = e.target.closest('.photo-card');
   if (!card) return;
   const id    = card.dataset.id;
   const index = photos.findIndex(p => p.id === id);
   if (index === -1) return;
   if (deleteBtn) { e.stopPropagation(); deletePhoto(index); return; }
+  if (downloadBtn) { e.stopPropagation(); downloadPolaroidCard(index); return; }
   openLightbox(index);
 }
 
@@ -564,7 +807,10 @@ function saveLightboxCaption() {
       if (overlayCaption) overlayCaption.textContent = newCaption;
       // Sync polaroid label
       const labelEl = card.querySelector('.polaroid-label');
-      if (labelEl && newCaption) labelEl.textContent = newCaption;
+      if (labelEl) {
+        labelEl.textContent = newCaption || `Memory #${currentIndex + 1}`;
+        labelEl.classList.toggle('empty-caption', !newCaption);
+      }
     }
   }
 }
@@ -881,7 +1127,7 @@ async function importSingleFile(fileId, sid, fileName) {
   photos.push({
     id     : `drive_${fileId}_${Date.now()}`,
     dataUrl,
-    caption: fileName ? fileName.replace(/\.[^.]+$/, '') : '',
+    caption: generateAutoCaption(fileName || '', Date.now()),
     addedAt: Date.now(),
     source : 'google_drive',
   });

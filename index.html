@@ -149,14 +149,6 @@ https://drive.google.com/file/d/1ABC…/view      ← single file"
   <!-- Photo Stats Bar -->
   <div class="stats-bar" id="statsBar">
     <span class="stat-count" id="photoCount">0 memories</span>
-    <div class="stat-divider"></div>
-    <span class="stat-label" id="layoutLabel">Masonry Layout</span>
-    <div class="layout-switcher">
-      <button class="layout-btn active" data-layout="masonry" title="Masonry">▦</button>
-      <button class="layout-btn" data-layout="grid" title="Grid">⊞</button>
-      <button class="layout-btn" data-layout="scattered" title="Scattered">❋</button>
-    </div>
-    <div class="stat-divider"></div>
     <button class="btn btn-captions" id="btnViewCaptions" title="View all captions">💬 Captions</button>
   </div>
 
@@ -172,8 +164,9 @@ https://drive.google.com/file/d/1ABC…/view      ← single file"
         <div class="captions-modal-title"><span>💬</span> All Captions</div>
         <button class="captions-modal-close" id="captionsModalClose" aria-label="Close">✕</button>
       </div>
-      <div class="captions-search">
+      <div class="captions-search-row">
         <input class="captions-search-input" id="captionsSearchInput" placeholder="Search captions…" type="search" />
+        <button class="btn btn-captions-magic" id="btnAutoCaptionAll" title="Auto-caption empty memories with aesthetic quotes & dates">✨ Auto-Caption Empty</button>
       </div>
       <div class="captions-stats" id="captionsStats"></div>
       <div class="captions-list" id="captionsList"></div>
@@ -189,8 +182,14 @@ https://drive.google.com/file/d/1ABC…/view      ← single file"
       <div class="lightbox-polaroid">
         <img class="lightbox-img" id="lightboxImg" src="" alt="" />
         <div class="lightbox-meta">
-          <input class="lightbox-caption" id="lightboxCaption" placeholder="Add a caption…" maxlength="100" />
-          <span class="lightbox-date" id="lightboxDate"></span>
+          <div class="lightbox-caption-row">
+            <input class="lightbox-caption" id="lightboxCaption" placeholder="Add a caption…" maxlength="100" />
+            <button class="lightbox-suggest-btn" id="lightboxSuggestBtn" type="button" title="Suggest an aesthetic caption">✨</button>
+          </div>
+          <div class="lightbox-meta-footer">
+            <span class="lightbox-date" id="lightboxDate"></span>
+            <button class="lightbox-download-btn" id="lightboxDownloadBtn" type="button" title="Download Polaroid Image">📥 Download Polaroid</button>
+          </div>
         </div>
       </div>
     </div>
