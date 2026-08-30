@@ -39,6 +39,7 @@
       <div class="header-actions">
         <button class="btn btn-ghost" id="btnClearAll" title="Clear all photos">🗑 Clear All</button>
         <button class="btn btn-ghost" id="btnShuffle" title="Re-arrange photos">🔀 Shuffle</button>
+        <button class="btn btn-ghost" id="btnLobby" title="Collaborative Lobbies">👥 Lobbies</button>
         <button class="btn btn-drive" id="btnDriveImport" title="Import from Google Drive">
           <svg class="drive-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M4.5 20L9 12L4.5 4H8.5L13 12L8.5 20H4.5Z" fill="#4285F4"/>
@@ -195,10 +196,25 @@ https://drive.google.com/file/d/1ABC…/view      ← single file"
     </div>
   </div>
 
+  <!-- Collaborative Lobby Modal -->
+  <div class="drive-modal" id="lobbyModal" role="dialog" aria-modal="true" aria-label="Collaborative Lobbies">
+    <div class="drive-modal-box lobby-modal-box">
+      <div class="drive-modal-header">
+        <div class="drive-modal-title">👥 Collaborative Memory Lobbies</div>
+        <button class="drive-modal-close" id="lobbyModalClose" aria-label="Close">✕</button>
+      </div>
+      <div class="lobby-modal-body" id="lobbyModalBody">
+        <!-- Rendered dynamically by collaborative.js -->
+      </div>
+    </div>
+  </div>
+
   <!-- Toast notifications -->
   <div class="toast-container" id="toastContainer" role="status" aria-live="polite"></div>
 
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="collage.js"></script>
+  <script src="collaborative.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

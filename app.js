@@ -576,8 +576,18 @@ async function processFiles(files) {
   });
 
   if (loaded > 0) {
-    saveToStorage();
-    renderUI();
+    if (typeof CollabEngine !== 'undefined' && CollabEngine.state.isCollaborative) {
+      const newItems = photos.slice(-loaded);
+      CollabEngine.uploadLobbyPhotos(newItems.map(p => ({
+        dataUrl: p.dataUrl,
+        filename: p.caption || 'memory.jpg',
+        caption: p.caption,
+        size: p.dataUrl.length
+      })));
+    } else {
+      saveToStorage();
+      renderUI();
+    }
     showToast(`✦ ${loaded} ${loaded === 1 ? 'memory' : 'memories'} added!`);
   }
 }
@@ -702,6 +712,20 @@ function bindEvents() {
   driveModalCancel.addEventListener('click', closeDriveModal);
   driveModal.addEventListener('click', e => { if (e.target === driveModal) closeDriveModal(); });
   driveImportBtn.addEventListener('click', handleDriveImport);
+
+  // Collaborative Lobby modal open/close
+  const btnLobby = document.getElementById('btnLobby');
+  const lobbyModal = document.getElementById('lobbyModal');
+  const lobbyModalClose = document.getElementById('lobbyModalClose');
+  if (btnLobby && typeof CollabEngine !== 'undefined') {
+    btnLobby.addEventListener('click', () => CollabEngine.openLobbyModal());
+  }
+  if (lobbyModalClose && typeof CollabEngine !== 'undefined') {
+    lobbyModalClose.addEventListener('click', () => CollabEngine.closeLobbyModal());
+  }
+  if (lobbyModal && typeof CollabEngine !== 'undefined') {
+    lobbyModal.addEventListener('click', e => { if (e.target === lobbyModal) CollabEngine.closeLobbyModal(); });
+  }
 }
 
 function closeDriveModal() {
@@ -738,13 +762,16 @@ function deletePhoto(index) {
     card.style.opacity    = '0';
     const photoId = photos[index].id;
     setTimeout(async () => {
-      photos.splice(index, 1);
-      // Remove from IDB too
-      if (idbDb) {
-        try { await idbDelete(photoId); } catch (e) { /* ignore */ }
+      if (typeof CollabEngine !== 'undefined' && CollabEngine.state.isCollaborative) {
+        await CollabEngine.deletePhoto(photoId);
+      } else {
+        photos.splice(index, 1);
+        if (idbDb) {
+          try { await idbDelete(photoId); } catch (e) { /* ignore */ }
+        }
+        saveToStorage();
+        renderUI();
       }
-      saveToStorage();
-      renderUI();
       showToast('Memory removed');
     }, 300);
   }
@@ -790,7 +817,11 @@ function saveLightboxCaption() {
   const newCaption = lightboxCaption.value.trim();
   if (photos[currentIndex].caption !== newCaption) {
     photos[currentIndex].caption = newCaption;
-    saveToStorage();
+    if (typeof CollabEngine !== 'undefined' && CollabEngine.state.isCollaborative) {
+      CollabEngine.updatePhotoCaption(photos[currentIndex].id, newCaption);
+    } else {
+      saveToStorage();
+    }
     const card = collageGrid.querySelector(`[data-id="${photos[currentIndex].id}"]`);
     if (card) {
       // Sync persist caption bar
