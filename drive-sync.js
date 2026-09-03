@@ -31,11 +31,15 @@ const DriveSync = (() => {
 
   // ── Helper: Get active Client ID ─────────────────────────────────────────
   function getClientId() {
-    return (localStorage.getItem('memoire_oauth_client_id') || _fetchedClientId || DEFAULT_CLIENT_ID).trim();
+    const custom = (localStorage.getItem('memoire_oauth_client_id') || '').trim();
+    if (custom && custom !== 'undefined' && custom !== 'null') return custom;
+    const fetched = (_fetchedClientId || '').trim();
+    if (fetched && fetched !== 'undefined' && fetched !== 'null') return fetched;
+    return DEFAULT_CLIENT_ID;
   }
 
   function setClientId(id) {
-    if (id && id.trim()) {
+    if (id && id.trim() && id.trim() !== 'undefined' && id.trim() !== 'null') {
       localStorage.setItem('memoire_oauth_client_id', id.trim());
     } else {
       localStorage.removeItem('memoire_oauth_client_id');
@@ -54,6 +58,12 @@ const DriveSync = (() => {
 
   // ── Initialise ─────────────────────────────────────────────────────────────
   async function init() {
+    // Seed default Client ID if missing or invalid in localStorage
+    const current = (localStorage.getItem('memoire_oauth_client_id') || '').trim();
+    if (!current || current === 'undefined' || current === 'null') {
+      localStorage.setItem('memoire_oauth_client_id', DEFAULT_CLIENT_ID);
+    }
+
     // Attempt to fetch Client ID dynamically from backend environment config
     try {
       const apiBase = (typeof API_BASE !== 'undefined') ? API_BASE : 'http://localhost:3001';
@@ -74,7 +84,7 @@ const DriveSync = (() => {
       setStatus('signed-in', 'Connected to Google Drive');
       ensureDriveFolder().catch(() => {});
     } else {
-      setStatus('idle', 'Not connected');
+      setStatus('idle', 'Ready to connect');
     }
   }
 
