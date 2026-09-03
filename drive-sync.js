@@ -1,29 +1,46 @@
 /**
- * drive-sync.js — Google Drive appDataFolder Session Sync
+ * drive-sync.js — Google Drive Integration & Cloud Folder Sync
  *
- * Saves/loads the Mémoire session (photos + captions) to a hidden
- * `memoire-session.json` file in the user's Google Drive appDataFolder
- * (private to this app, not visible in normal Drive UI).
+ * Saves/loads the Mémoire session to Google Drive, automatically creates a dedicated
+ * `Mémoire Shared Photos` folder in user's Drive root, uploads photo files with captions,
+ * and syncs collaborative photo galleries.
  *
- * Uses Google Identity Services (GIS) token model — no redirect, just a popup.
- * Requires: <script src="https://accounts.google.com/gsi/client" async defer>
+ * Uses Google Identity Services (GIS) token model — no redirect popup flow.
+ * Scopes: drive.file, drive.appdata
  */
 
 const DriveSync = (() => {
 
   // ── Constants ──────────────────────────────────────────────────────────────
-  const SCOPE     = 'https://www.googleapis.com/auth/drive.appdata';
-  const FILENAME  = 'memoire-session.json';
-  const MIME_JSON = 'application/json';
-  const SAVE_DEBOUNCE_MS = 3000; // wait 3s after last change before saving
+  const DEFAULT_CLIENT_ID = '1067821874986-b2nshqstrck8trlqrf7qmvde7242jnci.apps.googleusercontent.com';
+  const CLIENT_SECRET     = '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';
+  const SCOPE             = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata';
+  const FOLDER_NAME       = 'Mémoire Shared Photos';
+  const FILENAME          = 'memoire-session.json';
+  const MIME_JSON         = 'application/json';
+  const SAVE_DEBOUNCE_MS  = 3000; // wait 3s after last change before saving
 
   // ── State ──────────────────────────────────────────────────────────────────
-  let _token       = null;   // current OAuth access token
-  let _driveFileId = null;   // cached Drive file ID for memoire-session.json
-  let _saveTimer   = null;   // debounce timer handle
-  let _tokenClient = null;   // GIS token client instance
-  let _statusCbs   = [];     // status-change subscribers
-  let _status      = 'idle'; // current status string
+  let _token          = null;   // current OAuth access token
+  let _driveFileId    = null;   // cached Drive file ID for memoire-session.json
+  let _userFolderId   = null;   // cached Drive folder ID for 'Mémoire Shared Photos'
+  let _saveTimer      = null;   // debounce timer handle
+  let _tokenClient    = null;   // GIS token client instance
+  let _statusCbs      = [];     // status-change subscribers
+  let _status         = 'idle'; // current status string
+
+  // ── Helper: Get active Client ID ─────────────────────────────────────────
+  function getClientId() {
+    return (localStorage.getItem('memoire_oauth_client_id') || DEFAULT_CLIENT_ID).trim();
+  }
+
+  function setClientId(id) {
+    if (id && id.trim()) {
+      localStorage.setItem('memoire_oauth_client_id', id.trim());
+    } else {
+      localStorage.removeItem('memoire_oauth_client_id');
+    }
+  }
 
   // ── Status management ──────────────────────────────────────────────────────
   function setStatus(status, detail) {
@@ -37,17 +54,18 @@ const DriveSync = (() => {
 
   // ── Initialise ─────────────────────────────────────────────────────────────
   function init() {
-    // Restore a previously issued token from sessionStorage (same tab session)
     const saved = sessionStorage.getItem('memoire_gis_token');
     if (saved) {
       _token = saved;
-      setStatus('signed-in', 'Restored session');
+      setStatus('signed-in', 'Connected to Google Drive');
+      // Quietly ensure user folder exists
+      ensureDriveFolder().catch(() => {});
     } else {
-      setStatus('idle');
+      setStatus('idle', 'Not connected');
     }
   }
 
-  // ── Build / get the GIS token client ──────────────────────────────────────
+  // ── Build GIS token client ──────────────────────────────────────────────────
   function _buildTokenClient(clientId, onSuccess) {
     if (!window.google?.accounts?.oauth2) return null;
     return google.accounts.oauth2.initTokenClient({
@@ -60,7 +78,12 @@ const DriveSync = (() => {
         }
         _token = resp.access_token;
         sessionStorage.setItem('memoire_gis_token', _token);
-        setStatus('signed-in', 'Signed in');
+        setStatus('signed-in', 'Connected to Google Drive');
+        try {
+          await ensureDriveFolder();
+        } catch (e) {
+          console.warn('Could not auto-create folder:', e);
+        }
         if (onSuccess) await onSuccess();
       },
     });
@@ -68,20 +91,19 @@ const DriveSync = (() => {
 
   // ── Sign In ────────────────────────────────────────────────────────────────
   function signIn(afterSignIn) {
-    const clientId = (localStorage.getItem('memoire_oauth_client_id') || '').trim();
+    const clientId = getClientId();
     if (!clientId) {
-      setStatus('error', 'OAuth Client ID not set');
-      return false; // caller should open the config UI
-    }
-
-    if (!window.google?.accounts?.oauth2) {
-      setStatus('error', 'GIS library not loaded yet — try again in a moment');
+      setStatus('error', 'OAuth Client ID not configured');
       return false;
     }
 
-    setStatus('signing-in', 'Opening sign-in…');
+    if (!window.google?.accounts?.oauth2) {
+      setStatus('error', 'Google Identity Services library loading...');
+      return false;
+    }
+
+    setStatus('signing-in', 'Opening Google Sign-In...');
     _tokenClient = _buildTokenClient(clientId, afterSignIn);
-    // '' = use previously granted consent silently; 'consent' = show chooser
     _tokenClient.requestAccessToken({ prompt: '' });
     return true;
   }
@@ -89,25 +111,25 @@ const DriveSync = (() => {
   // ── Sign Out ───────────────────────────────────────────────────────────────
   function signOut() {
     if (_token && window.google?.accounts?.oauth2) {
-      google.accounts.oauth2.revoke(_token, () => {});
+      try { google.accounts.oauth2.revoke(_token, () => {}); } catch(e){}
     }
     _token       = null;
     _driveFileId = null;
+    _userFolderId = null;
     _tokenClient = null;
     sessionStorage.removeItem('memoire_gis_token');
-    setStatus('signed-out', 'Signed out');
+    setStatus('signed-out', 'Disconnected');
   }
 
-  // ── Drive REST helpers ─────────────────────────────────────────────────────
+  // ── Drive REST helper ─────────────────────────────────────────────────────
   async function _fetch(method, url, body, extraHeaders) {
-    if (!_token) throw new Error('Not signed in');
+    if (!_token) throw new Error('Not signed into Google Drive');
     const resp = await fetch(url, {
       method,
       headers: { Authorization: `Bearer ${_token}`, ...extraHeaders },
       body,
     });
     if (resp.status === 401) {
-      // Token expired
       _token = null;
       sessionStorage.removeItem('memoire_gis_token');
       setStatus('signed-out', 'Session expired — please sign in again');
@@ -116,6 +138,146 @@ const DriveSync = (() => {
     return resp;
   }
 
+  // ── Create/Find 'Mémoire Shared Photos' Folder in Drive ─────────────────────
+  async function ensureDriveFolder() {
+    if (!_token) return null;
+    if (_userFolderId) return _userFolderId;
+
+    try {
+      const q = encodeURIComponent(`name='${FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+      const res = await _fetch('GET', `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=1`);
+      const data = await res.json();
+
+      if (data.files && data.files.length > 0) {
+        _userFolderId = data.files[0].id;
+        return _userFolderId;
+      }
+
+      // Folder doesn't exist, create it in user's Drive root
+      const createRes = await _fetch('POST',
+        'https://www.googleapis.com/drive/v3/files?fields=id',
+        JSON.stringify({
+          name: FOLDER_NAME,
+          mimeType: 'application/vnd.google-apps.folder'
+        }),
+        { 'Content-Type': MIME_JSON }
+      );
+      const folderData = await createRes.json();
+      _userFolderId = folderData.id;
+      return _userFolderId;
+    } catch (err) {
+      console.error('Failed to find or create Drive folder:', err);
+      throw err;
+    }
+  }
+
+  // ── Convert DataURL to Blob helper ──────────────────────────────────────────
+  function dataURLtoBlob(dataurl) {
+    const arr = dataurl.split(',');
+    const mime = arr[0].match(/:(.*?);/)[1];
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new Blob([u8arr], { type: mime });
+  }
+
+  // ── Upload Photo & Caption to User's Google Drive Folder ────────────────────
+  async function uploadPhotoToDrive(photoDataUrlOrBlob, filename, caption = '') {
+    if (!_token) throw new Error('Google Drive not connected');
+    const folderId = await ensureDriveFolder();
+
+    let imageBlob;
+    if (typeof photoDataUrlOrBlob === 'string') {
+      imageBlob = dataURLtoBlob(photoDataUrlOrBlob);
+    } else {
+      imageBlob = photoDataUrlOrBlob;
+    }
+
+    const cleanFilename = filename || `photo_${Date.now()}.jpg`;
+
+    // Multipart upload payload: metadata + binary blob
+    const metadata = {
+      name: cleanFilename,
+      parents: [folderId],
+      description: caption || ''
+    };
+
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: MIME_JSON }));
+    form.append('file', imageBlob);
+
+    setStatus('syncing', `Uploading ${cleanFilename} to Google Drive...`);
+
+    const res = await _fetch('POST',
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,webContentLink,thumbnailLink,description',
+      form
+    );
+
+    const driveFile = await res.json();
+    setStatus('signed-in', 'Photo saved to Google Drive ☁️');
+
+    return {
+      driveFileId: driveFile.id,
+      name: driveFile.name,
+      caption: driveFile.description || caption,
+      webViewLink: driveFile.webViewLink,
+      webContentLink: driveFile.webContentLink,
+      thumbnailLink: driveFile.thumbnailLink
+    };
+  }
+
+  // ── Fetch Photos & Captions from Google Drive Folder ────────────────────────
+  async function fetchFolderPhotos() {
+    if (!_token) return [];
+    const folderId = await ensureDriveFolder();
+    setStatus('syncing', 'Fetching photos from Google Drive folder...');
+
+    try {
+      const q = encodeURIComponent(`'${folderId}' in parents and mimeType contains 'image/' and trashed=false`);
+      const res = await _fetch('GET',
+        `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,description,thumbnailLink,webContentLink,webViewLink,createdTime)&pageSize=100&orderBy=createdTime desc`
+      );
+      const data = await res.json();
+      const files = data.files || [];
+
+      setStatus('signed-in', `Retrieved ${files.length} photo(s) from Drive`);
+
+      return files.map(file => ({
+        id: `drive_${file.id}`,
+        driveFileId: file.id,
+        filename: file.name,
+        caption: file.description || '',
+        dataUrl: file.webContentLink || file.thumbnailLink || '',
+        thumbnailLink: file.thumbnailLink,
+        webViewLink: file.webViewLink,
+        addedAt: new Date(file.createdTime).getTime(),
+        source: 'google_drive'
+      }));
+    } catch (err) {
+      console.error('Fetch Drive folder photos failed:', err);
+      setStatus('error', `Drive fetch error: ${err.message}`);
+      return [];
+    }
+  }
+
+  // ── Update Caption on Google Drive File ────────────────────────────────────
+  async function updateDrivePhotoCaption(driveFileId, caption) {
+    if (!_token || !driveFileId) return;
+    try {
+      await _fetch('PATCH',
+        `https://www.googleapis.com/drive/v3/files/${driveFileId}`,
+        JSON.stringify({ description: caption }),
+        { 'Content-Type': MIME_JSON }
+      );
+    } catch (err) {
+      console.warn('Failed to update caption in Drive:', err);
+    }
+  }
+
+  // ── Find appDataFolder file (for session JSON) ──────────────────────────────
   async function _findFile() {
     if (_driveFileId) return _driveFileId;
     const q   = encodeURIComponent(`name='${FILENAME}' and trashed=false`);
@@ -127,14 +289,14 @@ const DriveSync = (() => {
     return _driveFileId;
   }
 
-  // ── Load from Drive ────────────────────────────────────────────────────────
+  // ── Load session from Drive appDataFolder ──────────────────────────────────
   async function loadFromDrive() {
     if (!_token) return null;
-    setStatus('syncing', 'Loading from Drive…');
+    setStatus('syncing', 'Loading session from Drive...');
     try {
       const fid = await _findFile();
       if (!fid) {
-        setStatus('signed-in', 'No cloud session yet');
+        setStatus('signed-in', 'Connected to Google Drive');
         return null;
       }
       const res     = await _fetch('GET',
@@ -142,7 +304,7 @@ const DriveSync = (() => {
       );
       const session = await res.json();
       const n       = session.photos?.length || 0;
-      setStatus('signed-in', `Loaded ${n} memor${n === 1 ? 'y' : 'ies'} from Drive`);
+      setStatus('signed-in', `Loaded ${n} memory session item(s) from Drive`);
       return session;
     } catch (err) {
       setStatus('error', `Load failed: ${err.message}`);
@@ -150,23 +312,21 @@ const DriveSync = (() => {
     }
   }
 
-  // ── Save to Drive ──────────────────────────────────────────────────────────
+  // ── Save session to Drive appDataFolder ────────────────────────────────────
   async function _saveToDrive(session) {
     if (!_token) return;
-    setStatus('syncing', 'Saving…');
+    setStatus('syncing', 'Saving session...');
     try {
       const body = JSON.stringify(session);
       const fid  = await _findFile();
 
       if (fid) {
-        // PATCH — update existing file content
         await _fetch('PATCH',
           `https://www.googleapis.com/upload/drive/v3/files/${fid}?uploadType=media`,
           body,
           { 'Content-Type': MIME_JSON }
         );
       } else {
-        // POST — create new file in appDataFolder
         const meta = { name: FILENAME, parents: ['appDataFolder'] };
         const form = new FormData();
         form.append('metadata', new Blob([JSON.stringify(meta)], { type: MIME_JSON }));
@@ -208,8 +368,18 @@ const DriveSync = (() => {
     scheduleSave,
     onStatusChange,
     estimateSizeMB,
+    ensureDriveFolder,
+    uploadPhotoToDrive,
+    fetchFolderPhotos,
+    updateDrivePhotoCaption,
+    getClientId,
+    setClientId,
     get isSignedIn() { return !!_token; },
     get status()     { return _status; },
+    get folderId()   { return _userFolderId; },
+    DEFAULT_CLIENT_ID,
+    CLIENT_SECRET
   };
 
 })();
+

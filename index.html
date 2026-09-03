@@ -14,13 +14,14 @@
   <meta name="apple-mobile-web-app-title" content="Mémoire" />
   <link rel="manifest" href="manifest.json" />
 
-  <!-- Performance hints -->
+  <!-- Performance hints & Google Identity Services -->
   <link rel="dns-prefetch" href="https://fonts.googleapis.com" />
   <link rel="dns-prefetch" href="https://www.googleapis.com" />
   <link rel="dns-prefetch" href="https://lh3.googleusercontent.com" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;500;600&family=Dancing+Script:wght@600&display=swap" rel="stylesheet" />
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -40,13 +41,13 @@
         <button class="btn btn-ghost" id="btnClearAll" title="Clear all photos">🗑 Clear All</button>
         <button class="btn btn-ghost" id="btnShuffle" title="Re-arrange photos">🔀 Shuffle</button>
         <button class="btn btn-ghost" id="btnLobby" title="Collaborative Lobbies">👥 Lobbies</button>
-        <button class="btn btn-drive" id="btnDriveImport" title="Import from Google Drive">
+        <button class="btn btn-drive" id="btnDriveImport" title="Google Drive Upload & Gallery">
           <svg class="drive-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M4.5 20L9 12L4.5 4H8.5L13 12L8.5 20H4.5Z" fill="#4285F4"/>
             <path d="M15.5 20L20 12L15.5 4H11.5L16 12L11.5 20H15.5Z" fill="#FBBC05"/>
             <path d="M4.5 20H15.5L13 16H7L4.5 20Z" fill="#34A853"/>
           </svg>
-          Drive
+          Drive Sync
         </button>
         <label class="btn btn-primary" for="fileInput" id="uploadLabel">
           <span>✦ Add Memories</span>
@@ -83,8 +84,8 @@
     </div>
   </section>
 
-  <!-- Google Drive Import Modal -->
-  <div class="drive-modal" id="driveModal" role="dialog" aria-modal="true" aria-label="Import from Google Drive">
+  <!-- Google Drive Import & Sync Modal -->
+  <div class="drive-modal" id="driveModal" role="dialog" aria-modal="true" aria-label="Google Drive Upload & Gallery Sync">
     <div class="drive-modal-box">
       <div class="drive-modal-header">
         <div class="drive-modal-title">
@@ -93,17 +94,36 @@
             <path d="M15.5 20L20 12L15.5 4H11.5L16 12L11.5 20H15.5Z" fill="#FBBC05"/>
             <path d="M4.5 20H15.5L13 16H7L4.5 20Z" fill="#34A853"/>
           </svg>
-          Import from Google Drive
+          Google Drive Cloud Gallery
         </div>
         <button class="drive-modal-close" id="driveModalClose" aria-label="Close">✕</button>
       </div>
 
+      <!-- Google Drive Account Connect Card -->
+      <div class="drive-connect-card" id="driveConnectCard">
+        <div class="drive-connect-info">
+          <div class="drive-connect-title">☁️ Automatic Google Drive Backup & Sync</div>
+          <div class="drive-connect-desc">Connect your Google Drive account. Photos uploaded here will be saved to your personal <strong>Mémoire Shared Photos</strong> Drive folder along with their captions!</div>
+        </div>
+        <div class="drive-connect-actions">
+          <button class="btn btn-drive-connect" id="btnDriveSignIn">
+            <svg class="google-icon" viewBox="0 0 24 24" width="18" height="18">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+            </svg>
+            <span id="btnDriveSignInText">Sign In with Google</span>
+          </button>
+          <button class="btn btn-ghost btn-sm" id="btnDriveFolderFetch" style="display:none;">📁 Import My Drive Folder</button>
+        </div>
+        <div class="drive-sync-status-msg" id="driveSyncStatusMsg">Status: Not connected</div>
+      </div>
+
       <div class="drive-info-box">
-        <p class="drive-info-title">📌 How it works</p>
+        <p class="drive-info-title">📌 Quick Import via Public Links</p>
         <ul class="drive-info-list">
-          <li>Paste one or more Drive links — <strong>files</strong> or <strong>folders</strong> (one per line)</li>
-          <li>The app <strong>auto-detects</strong> whether each link is a file or folder</li>
-          <li>Folders: all images inside are imported automatically (requires API key below)</li>
+          <li>Paste direct Google Drive file or folder links below</li>
           <li>Files &amp; folders must be shared as <strong>"Anyone with the link"</strong></li>
         </ul>
       </div>
@@ -115,7 +135,7 @@
           <span class="drive-apikey-chevron" id="apiKeyChevron">▸</span>
         </div>
         <div class="drive-apikey-body" id="driveApiKeyBody">
-          <p class="drive-apikey-hint">Required only for <strong>folder</strong> imports. Get a free key at <a href="https://console.cloud.google.com/" target="_blank" rel="noopener" class="drive-ext-link">Google Cloud Console</a> → APIs &amp; Services → Credentials.</p>
+          <p class="drive-apikey-hint">Optional fallback for public folder link parsing. Get a key at <a href="https://console.cloud.google.com/" target="_blank" rel="noopener" class="drive-ext-link">Google Cloud Console</a>.</p>
           <div class="drive-apikey-row">
             <input type="password" class="drive-apikey-input" id="driveApiKeyInput" placeholder="AIza…" autocomplete="off" />
             <button class="drive-apikey-save" id="driveApiKeySave">Save</button>
@@ -130,9 +150,9 @@
           id="driveUrlInput"
           placeholder="Paste Google Drive link(s) here, one per line…
 
-https://drive.google.com/drive/folders/1XYZ…   ← folder (imports all images)
-https://drive.google.com/file/d/1ABC…/view      ← single file"
-          rows="5"
+https://drive.google.com/drive/folders/1XYZ…   ← folder
+https://drive.google.com/file/d/1ABC…/view      ← file"
+          rows="4"
         ></textarea>
         <div class="drive-detect-bar" id="driveDetectBar"></div>
       </div>
@@ -141,7 +161,7 @@ https://drive.google.com/file/d/1ABC…/view      ← single file"
 
       <div class="drive-modal-actions">
         <button class="btn btn-ghost" id="driveModalCancel">Cancel</button>
-        <button class="btn btn-drive-import" id="driveImportBtn">Import Photos →</button>
+        <button class="btn btn-drive-import" id="driveImportBtn">Import Link Photos →</button>
       </div>
     </div>
   </div>
@@ -214,6 +234,7 @@ https://drive.google.com/file/d/1ABC…/view      ← single file"
 
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="collage.js"></script>
+  <script src="drive-sync.js"></script>
   <script src="collaborative.js"></script>
   <script src="app.js"></script>
 </body>

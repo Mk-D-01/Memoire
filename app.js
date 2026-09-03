@@ -576,6 +576,20 @@ async function processFiles(files) {
   });
 
   if (loaded > 0) {
+    // If connected to Google Drive, auto-upload to user's 'Mémoire Shared Photos' folder
+    if (typeof DriveSync !== 'undefined' && DriveSync.isSignedIn) {
+      const newlyAdded = photos.slice(-loaded);
+      for (const item of newlyAdded) {
+        DriveSync.uploadPhotoToDrive(item.dataUrl, item.caption || 'memory.jpg', item.caption)
+          .then(driveRes => {
+            item.driveFileId = driveRes.driveFileId;
+            item.webViewLink = driveRes.webViewLink;
+            saveToStorage();
+          })
+          .catch(err => console.warn('Drive auto-upload error:', err));
+      }
+    }
+
     if (typeof CollabEngine !== 'undefined' && CollabEngine.state.isCollaborative) {
       const newItems = photos.slice(-loaded);
       CollabEngine.uploadLobbyPhotos(newItems.map(p => ({
@@ -817,6 +831,11 @@ function saveLightboxCaption() {
   const newCaption = lightboxCaption.value.trim();
   if (photos[currentIndex].caption !== newCaption) {
     photos[currentIndex].caption = newCaption;
+
+    if (photos[currentIndex].driveFileId && typeof DriveSync !== 'undefined' && DriveSync.isSignedIn) {
+      DriveSync.updateDrivePhotoCaption(photos[currentIndex].driveFileId, newCaption);
+    }
+
     if (typeof CollabEngine !== 'undefined' && CollabEngine.state.isCollaborative) {
       CollabEngine.updatePhotoCaption(photos[currentIndex].id, newCaption);
     } else {
@@ -985,6 +1004,79 @@ function initDriveUI() {
   if (saved) {
     driveApiKeyInput.value = saved;
     updateApiKeyBadge(true);
+  }
+
+  // Initialize DriveSync if available
+  if (typeof DriveSync !== 'undefined') {
+    DriveSync.init();
+
+    const btnDriveSignInText = document.getElementById('btnDriveSignInText');
+    const btnDriveFolderFetch = document.getElementById('btnDriveFolderFetch');
+    const driveSyncStatusMsg = document.getElementById('driveSyncStatusMsg');
+    const btnDriveSignIn = document.getElementById('btnDriveSignIn');
+
+    const updateDriveSyncUI = (status, detail) => {
+      if (driveSyncStatusMsg) {
+        driveSyncStatusMsg.textContent = `Status: ${detail || status}`;
+      }
+      if (DriveSync.isSignedIn) {
+        if (btnDriveSignInText) btnDriveSignInText.textContent = '✓ Connected to Google Drive';
+        if (btnDriveFolderFetch) btnDriveFolderFetch.style.display = 'inline-block';
+      } else {
+        if (btnDriveSignInText) btnDriveSignInText.textContent = 'Sign In with Google';
+        if (btnDriveFolderFetch) btnDriveFolderFetch.style.display = 'none';
+      }
+    };
+
+    DriveSync.onStatusChange(updateDriveSyncUI);
+    updateDriveSyncUI(DriveSync.status);
+
+    if (btnDriveSignIn) {
+      btnDriveSignIn.addEventListener('click', () => {
+        if (DriveSync.isSignedIn) {
+          DriveSync.signOut();
+          showToast('Disconnected from Google Drive');
+        } else {
+          DriveSync.signIn(async () => {
+            showToast('☁️ Connected to Google Drive!');
+            renderUI();
+          });
+        }
+      });
+    }
+
+    if (btnDriveFolderFetch) {
+      btnDriveFolderFetch.addEventListener('click', async () => {
+        btnDriveFolderFetch.disabled = true;
+        btnDriveFolderFetch.textContent = '⏳ Fetching...';
+        try {
+          const drivePhotos = await DriveSync.fetchFolderPhotos();
+          if (drivePhotos && drivePhotos.length > 0) {
+            let addedCount = 0;
+            drivePhotos.forEach(dp => {
+              if (!photos.some(p => p.id === dp.id || (p.driveFileId && p.driveFileId === dp.driveFileId))) {
+                photos.push(dp);
+                addedCount++;
+              }
+            });
+            if (addedCount > 0) {
+              saveToStorage();
+              renderUI();
+              showToast(`📁 ${addedCount} photo(s) imported from 'Mémoire Shared Photos' folder!`);
+            } else {
+              showToast('✦ All photos from your Drive folder are already in Mémoire');
+            }
+          } else {
+            showToast('ℹ️ No photos found in your Google Drive folder yet');
+          }
+        } catch (err) {
+          showToast(`❌ ${err.message}`);
+        } finally {
+          btnDriveFolderFetch.disabled = false;
+          btnDriveFolderFetch.textContent = '📁 Import My Drive Folder';
+        }
+      });
+    }
   }
 
   driveApiKeyToggle.addEventListener('click', () => {

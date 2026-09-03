@@ -255,11 +255,24 @@ const CollabEngine = {
   },
 
   /**
-   * Upload Photos to Active Lobby Server
+   * Upload Photos to Active Lobby Server & User's Google Drive Folder
    */
   async uploadLobbyPhotos(photoArray) {
     if (!this.state.activeLobby || !this.state.token) return false;
     try {
+      // If Google Drive is connected, auto-upload photos and captions to Drive folder
+      if (typeof DriveSync !== 'undefined' && DriveSync.isSignedIn) {
+        for (const item of photoArray) {
+          try {
+            const driveRes = await DriveSync.uploadPhotoToDrive(item.dataUrl, item.filename, item.caption);
+            item.driveFileId = driveRes.driveFileId;
+            item.driveViewLink = driveRes.webViewLink;
+          } catch (dErr) {
+            console.warn('Google Drive auto-upload warning:', dErr);
+          }
+        }
+      }
+
       const res = await fetch(`${API_BASE}/lobbies/${this.state.activeLobby.id}/photos/upload`, {
         method: 'POST',
         headers: {
@@ -283,11 +296,16 @@ const CollabEngine = {
   },
 
   /**
-   * Edit Caption on Server
+   * Edit Caption on Server and Google Drive
    */
   async updatePhotoCaption(photoId, caption) {
     if (!this.state.activeLobby || !this.state.token) return;
     try {
+      const item = typeof photos !== 'undefined' ? photos.find(p => p.id === photoId) : null;
+      if (item && item.driveFileId && typeof DriveSync !== 'undefined' && DriveSync.isSignedIn) {
+        DriveSync.updateDrivePhotoCaption(item.driveFileId, caption);
+      }
+
       await fetch(`${API_BASE}/lobbies/${this.state.activeLobby.id}/photos/${photoId}`, {
         method: 'PATCH',
         headers: {
