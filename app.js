@@ -1095,6 +1095,45 @@ function initDriveUI() {
     if (e.key === 'Enter') driveApiKeySave.click();
   });
 
+  // Client ID UI event listeners
+  const driveClientIdSection = document.getElementById('driveClientIdSection');
+  const driveClientIdToggle = document.getElementById('driveClientIdToggle');
+  const driveClientIdInput = document.getElementById('driveClientIdInput');
+  const driveClientIdSave = document.getElementById('driveClientIdSave');
+
+  if (driveClientIdInput && typeof DriveSync !== 'undefined') {
+    const customId = localStorage.getItem('memoire_oauth_client_id') || '';
+    if (customId) {
+      driveClientIdInput.value = customId;
+      updateClientIdBadge('custom');
+    } else {
+      driveClientIdInput.value = DriveSync.getClientId() || '';
+      updateClientIdBadge('active');
+    }
+  }
+
+  if (driveClientIdToggle) {
+    driveClientIdToggle.addEventListener('click', () => {
+      driveClientIdSection.classList.toggle('open');
+    });
+  }
+
+  if (driveClientIdSave) {
+    driveClientIdSave.addEventListener('click', () => {
+      const id = driveClientIdInput.value.trim();
+      if (!id) {
+        DriveSync.setClientId('');
+        showToast('⚙️ Reset to default Client ID');
+        updateClientIdBadge('default');
+      } else {
+        DriveSync.setClientId(id);
+        showToast('⚙️ OAuth Client ID saved!');
+        updateClientIdBadge('custom');
+      }
+      if (driveClientIdSection) driveClientIdSection.classList.remove('open');
+    });
+  }
+
   let detectTimer;
   driveUrlInput.addEventListener('input', () => {
     clearTimeout(detectTimer);
@@ -1105,6 +1144,18 @@ function initDriveUI() {
 function updateApiKeyBadge(isSet) {
   apiKeyBadge.textContent = isSet ? '✓ saved' : 'not set';
   apiKeyBadge.classList.toggle('set', isSet);
+}
+
+function updateClientIdBadge(mode) {
+  const badge = document.getElementById('clientIdBadge');
+  if (!badge) return;
+  if (mode === 'custom') {
+    badge.textContent = '✓ custom';
+    badge.classList.add('set');
+  } else {
+    badge.textContent = 'active';
+    badge.classList.remove('set');
+  }
 }
 
 function updateDetectBar() {

@@ -32,9 +32,9 @@ const DriveSync = (() => {
   // ── Helper: Get active Client ID ─────────────────────────────────────────
   function getClientId() {
     const custom = (localStorage.getItem('memoire_oauth_client_id') || '').trim();
-    if (custom && custom !== 'undefined' && custom !== 'null') return custom;
+    if (custom && custom !== 'undefined' && custom !== 'null' && custom.length > 5) return custom;
     const fetched = (_fetchedClientId || '').trim();
-    if (fetched && fetched !== 'undefined' && fetched !== 'null') return fetched;
+    if (fetched && fetched !== 'undefined' && fetched !== 'null' && fetched.length > 5) return fetched;
     return DEFAULT_CLIENT_ID;
   }
 
@@ -58,12 +58,6 @@ const DriveSync = (() => {
 
   // ── Initialise ─────────────────────────────────────────────────────────────
   async function init() {
-    // Seed default Client ID if missing or invalid in localStorage
-    const current = (localStorage.getItem('memoire_oauth_client_id') || '').trim();
-    if (!current || current === 'undefined' || current === 'null') {
-      localStorage.setItem('memoire_oauth_client_id', DEFAULT_CLIENT_ID);
-    }
-
     // Attempt to fetch Client ID dynamically from backend environment config
     try {
       const apiBase = (typeof API_BASE !== 'undefined') ? API_BASE : 'http://localhost:3001';
@@ -75,7 +69,7 @@ const DriveSync = (() => {
         }
       }
     } catch (e) {
-      // Backend offline or unreachable — fallback to stored/default Client ID
+      // Backend offline or unreachable — fallback to default Client ID
     }
 
     const saved = sessionStorage.getItem('memoire_gis_token');
@@ -96,7 +90,7 @@ const DriveSync = (() => {
       scope     : SCOPE,
       callback  : async (resp) => {
         if (resp.error) {
-          setStatus('error', resp.error_description || resp.error);
+          setStatus('error', `OAuth Error: ${resp.error_description || resp.error}`);
           return;
         }
         _token = resp.access_token;
@@ -114,19 +108,23 @@ const DriveSync = (() => {
 
   // ── Sign In ────────────────────────────────────────────────────────────────
   function signIn(afterSignIn) {
-    const clientId = getClientId();
-    if (!clientId) {
+    let clientId = getClientId();
+    if (!clientId || clientId.trim().length < 5) {
       setStatus('error', 'OAuth Client ID not configured');
       return false;
     }
 
     if (!window.google?.accounts?.oauth2) {
-      setStatus('error', 'Google Identity Services library loading...');
+      setStatus('error', 'Google Identity library still loading — please try again in a moment');
       return false;
     }
 
     setStatus('signing-in', 'Opening Google Sign-In...');
     _tokenClient = _buildTokenClient(clientId, afterSignIn);
+    if (!_tokenClient) {
+      setStatus('error', 'Failed to initialize Google Sign-In client');
+      return false;
+    }
     _tokenClient.requestAccessToken({ prompt: '' });
     return true;
   }

@@ -120,12 +120,19 @@
         <div class="drive-sync-status-msg" id="driveSyncStatusMsg">Status: Not connected</div>
       </div>
 
-      <div class="drive-info-box">
-        <p class="drive-info-title">📌 Quick Import via Public Links</p>
-        <ul class="drive-info-list">
-          <li>Paste direct Google Drive file or folder links below</li>
-          <li>Files &amp; folders must be shared as <strong>"Anyone with the link"</strong></li>
-        </ul>
+      <!-- OAuth Client ID section -->
+      <div class="drive-apikey-section" id="driveClientIdSection">
+        <div class="drive-apikey-header" id="driveClientIdToggle">
+          <span class="drive-apikey-label">⚙️ OAuth Client ID <span class="drive-apikey-badge" id="clientIdBadge">default</span></span>
+          <span class="drive-apikey-chevron" id="clientIdChevron">▸</span>
+        </div>
+        <div class="drive-apikey-body" id="driveClientIdBody">
+          <p class="drive-apikey-hint">Google OAuth 2.0 Web Client ID. Overrides backend configuration if specified.</p>
+          <div class="drive-apikey-row">
+            <input type="text" class="drive-apikey-input" id="driveClientIdInput" placeholder="1067821874986-…apps.googleusercontent.com" autocomplete="off" />
+            <button class="drive-apikey-save" id="driveClientIdSave">Save</button>
+          </div>
+        </div>
       </div>
 
       <!-- API Key section (needed for folder listing) -->
