@@ -35,6 +35,13 @@ const optionalAuth = async (req, res, next) => {
   next();
 };
 
+// 0. Public Auth & Client Config Endpoint
+router.get('/config', (req, res) => {
+  res.json({
+    clientId: process.env.GOOGLE_CLIENT_ID || ''
+  });
+});
+
 // 1. Guest Authentication Endpoint (Instant 1-Click Join for fast dev & testing)
 router.post('/guest', async (req, res) => {
   try {

@@ -12,8 +12,6 @@
 const DriveSync = (() => {
 
   // ── Constants ──────────────────────────────────────────────────────────────
-  const DEFAULT_CLIENT_ID = '1067821874986-b2nshqstrck8trlqrf7qmvde7242jnci.apps.googleusercontent.com';
-  const CLIENT_SECRET     = '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';
   const SCOPE             = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata';
   const FOLDER_NAME       = 'Mémoire Shared Photos';
   const FILENAME          = 'memoire-session.json';
@@ -24,6 +22,7 @@ const DriveSync = (() => {
   let _token          = null;   // current OAuth access token
   let _driveFileId    = null;   // cached Drive file ID for memoire-session.json
   let _userFolderId   = null;   // cached Drive folder ID for 'Mémoire Shared Photos'
+  let _fetchedClientId = null;  // dynamically fetched Client ID from environment
   let _saveTimer      = null;   // debounce timer handle
   let _tokenClient    = null;   // GIS token client instance
   let _statusCbs      = [];     // status-change subscribers
@@ -31,7 +30,7 @@ const DriveSync = (() => {
 
   // ── Helper: Get active Client ID ─────────────────────────────────────────
   function getClientId() {
-    return (localStorage.getItem('memoire_oauth_client_id') || DEFAULT_CLIENT_ID).trim();
+    return (localStorage.getItem('memoire_oauth_client_id') || _fetchedClientId || '').trim();
   }
 
   function setClientId(id) {
@@ -53,12 +52,25 @@ const DriveSync = (() => {
   }
 
   // ── Initialise ─────────────────────────────────────────────────────────────
-  function init() {
+  async function init() {
+    // Attempt to fetch Client ID dynamically from backend environment config
+    try {
+      const apiBase = (typeof API_BASE !== 'undefined') ? API_BASE : 'http://localhost:3001';
+      const res = await fetch(`${apiBase}/auth/config`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.clientId) {
+          _fetchedClientId = data.clientId;
+        }
+      }
+    } catch (e) {
+      // Backend offline or unreachable — fallback to stored client ID
+    }
+
     const saved = sessionStorage.getItem('memoire_gis_token');
     if (saved) {
       _token = saved;
       setStatus('signed-in', 'Connected to Google Drive');
-      // Quietly ensure user folder exists
       ensureDriveFolder().catch(() => {});
     } else {
       setStatus('idle', 'Not connected');
@@ -376,9 +388,7 @@ const DriveSync = (() => {
     setClientId,
     get isSignedIn() { return !!_token; },
     get status()     { return _status; },
-    get folderId()   { return _userFolderId; },
-    DEFAULT_CLIENT_ID,
-    CLIENT_SECRET
+    get folderId()   { return _userFolderId; }
   };
 
 })();
