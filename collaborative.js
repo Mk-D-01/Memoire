@@ -1,9 +1,10 @@
 /**
  * Mémoire — Collaborative Lobby Engine (Frontend)
- * Handles real-time multi-user lobbies, guest sessions, Socket.IO sync, and invite links.
+ * Handles real-time multi-user lobbies, guest sessions, Socket.IO sync, invite links,
+ * and Google Drive photo & caption backups.
  */
 
-const API_BASE = 'http://localhost:3001';
+const API_BASE = window.MEMOIRE_API_BASE || localStorage.getItem('memoire_api_base') || 'http://localhost:3001';
 
 const CollabEngine = {
   state: {
@@ -24,7 +25,6 @@ const CollabEngine = {
       await this.fetchProfile();
     }
 
-    // Check URL query params for invite token: e.g. ?invite=abc123xyz
     const urlParams = new URLSearchParams(window.location.search);
     const inviteToken = urlParams.get('invite');
     if (inviteToken) {
@@ -49,7 +49,7 @@ const CollabEngine = {
         this.logout();
       }
     } catch (err) {
-      console.warn('Backend server not reachable or offline.', err);
+      console.warn('Backend server not reachable or offline at ' + API_BASE);
     }
   },
 
@@ -97,9 +97,10 @@ const CollabEngine = {
       this.state.socket = null;
     }
     this.updateHeaderProfileUI();
-    // Switch back to local IndexedDB
-    if (typeof loadPhotos === 'function') {
-      loadPhotos();
+    if (typeof loadFromIDB === 'function') {
+      loadFromIDB().then(() => {
+        if (typeof renderUI === 'function') renderUI();
+      });
     }
   },
 
@@ -186,13 +187,8 @@ const CollabEngine = {
       this.state.myRole = data.yourRole;
       this.state.isCollaborative = true;
 
-      // Connect Socket.IO for real-time updates
       this.connectSocket(lobbyId);
-
-      // Fetch photos from server
       await this.fetchLobbyPhotos(lobbyId);
-
-      // Update UI Header and Banner
       this.updateLobbyBannerUI();
 
       if (typeof showToast === 'function') {
@@ -207,14 +203,16 @@ const CollabEngine = {
    * Switch back to Personal Memory Book (Local IDB)
    */
   switchToPersonalMode() {
+    if (this.state.socket && this.state.activeLobby) {
+      this.state.socket.emit('leave_lobby', { lobbyId: this.state.activeLobby.id });
+    }
     this.state.isCollaborative = false;
     this.state.activeLobby = null;
-    if (this.state.socket) {
-      this.state.socket.emit('leave_lobby', { lobbyId: this.state.activeLobby?.id });
-    }
     this.updateLobbyBannerUI();
-    if (typeof loadPhotos === 'function') {
-      loadPhotos();
+    if (typeof loadFromIDB === 'function') {
+      loadFromIDB().then(() => {
+        if (typeof renderUI === 'function') renderUI();
+      });
     }
     if (typeof showToast === 'function') {
       showToast('Switched to Personal Memory Book 📖');
@@ -232,7 +230,6 @@ const CollabEngine = {
       if (!res.ok) throw new Error('Failed to fetch lobby photos');
       const data = await res.json();
 
-      // Update global photos array in app.js
       if (typeof photos !== 'undefined') {
         photos = data.photos.map(p => ({
           id: p.id,
@@ -242,12 +239,7 @@ const CollabEngine = {
           uploadedAvatar: p.uploaderAvatar,
           addedAt: p.uploadedAt
         }));
-        if (typeof renderCollage === 'function') {
-          renderCollage();
-        }
-        if (typeof updateStats === 'function') {
-          updateStats();
-        }
+        if (typeof renderUI === 'function') renderUI();
       }
     } catch (err) {
       console.error('Fetch lobby photos error:', err);
@@ -260,7 +252,6 @@ const CollabEngine = {
   async uploadLobbyPhotos(photoArray) {
     if (!this.state.activeLobby || !this.state.token) return false;
     try {
-      // If Google Drive is connected, auto-upload photos and captions to Drive folder
       if (typeof DriveSync !== 'undefined' && DriveSync.isSignedIn) {
         for (const item of photoArray) {
           try {
@@ -363,7 +354,6 @@ const CollabEngine = {
 
       this.state.socket.on('photo_added', ({ photo, uploadedBy }) => {
         if (typeof photos !== 'undefined') {
-          // Check if photo already exists
           if (!photos.some(p => p.id === photo.id)) {
             photos.unshift({
               id: photo.id,
@@ -373,8 +363,7 @@ const CollabEngine = {
               uploadedAvatar: photo.uploaderAvatar,
               addedAt: photo.uploadedAt
             });
-            if (typeof renderCollage === 'function') renderCollage();
-            if (typeof updateStats === 'function') updateStats();
+            if (typeof renderUI === 'function') renderUI();
             if (typeof showToast === 'function') {
               showToast(`📸 ${photo.uploaderName || uploadedBy} added a photo!`);
             }
@@ -382,12 +371,12 @@ const CollabEngine = {
         }
       });
 
-      this.state.socket.on('caption_updated', ({ photoId, caption, editedBy }) => {
+      this.state.socket.on('caption_updated', ({ photoId, caption }) => {
         if (typeof photos !== 'undefined') {
           const item = photos.find(p => p.id === photoId);
           if (item) {
             item.caption = caption;
-            if (typeof renderCollage === 'function') renderCollage();
+            if (typeof renderUI === 'function') renderUI();
           }
         }
       });
@@ -395,8 +384,7 @@ const CollabEngine = {
       this.state.socket.on('photo_deleted', ({ photoId, deletedBy }) => {
         if (typeof photos !== 'undefined') {
           photos = photos.filter(p => p.id !== photoId);
-          if (typeof renderCollage === 'function') renderCollage();
-          if (typeof updateStats === 'function') updateStats();
+          if (typeof renderUI === 'function') renderUI();
           if (typeof showToast === 'function') {
             showToast(`🗑 A photo was removed by ${deletedBy}`);
           }
@@ -405,7 +393,7 @@ const CollabEngine = {
 
       this.state.socket.on('member_joined_room', ({ displayName }) => {
         if (typeof showToast === 'function') {
-          showToast(`👋 ${displayName} joined the lobby live!`);
+          showToast(`👋 ${displayName} joined live!`);
         }
       });
     } else {
@@ -416,263 +404,130 @@ const CollabEngine = {
   /**
    * Handle Invite Token from URL
    */
-  async handleInviteFromUrl(token) {
-    try {
-      const res = await fetch(`${API_BASE}/lobbies/invite-info/${token}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      this.pendingInvite = { token, lobby: data.lobby };
-      this.openLobbyModal();
-    } catch (err) {
-      console.warn('Invalid invite link', err);
+  async handleInviteFromUrl(inviteToken) {
+    if (!this.state.token) {
+      const name = prompt('Enter your name to join this memory lobby:', 'Memory Maker');
+      if (name) {
+        await this.loginAsGuest(name);
+      } else {
+        return;
+      }
     }
-  },
-
-  /**
-   * Copy Invite Link to Clipboard
-   */
-  async copyInviteLink() {
-    if (!this.state.activeLobby || !this.state.token) return;
     try {
-      const res = await fetch(`${API_BASE}/lobbies/${this.state.activeLobby.id}`, {
-        headers: { 'Authorization': `Bearer ${this.state.token}` }
-      });
-      const data = await res.json();
-      let token = data.invites && data.invites.length > 0 ? data.invites[0].token : null;
-
-      if (!token) {
-        const invRes = await fetch(`${API_BASE}/lobbies/${this.state.activeLobby.id}/invites`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.state.token}`
-          },
-          body: JSON.stringify({ defaultRole: 'editor' })
-        });
-        const invData = await invRes.json();
-        token = invData.invite.token;
-      }
-
-      const shareUrl = `${window.location.origin}${window.location.pathname}?invite=${token}`;
-      await navigator.clipboard.writeText(shareUrl);
-      if (typeof showToast === 'function') {
-        showToast('🔗 Invite link copied to clipboard!');
-      }
+      await this.joinLobbyByToken(inviteToken);
     } catch (err) {
-      console.error(err);
       if (typeof showToast === 'function') {
-        showToast('❌ Failed to copy invite link');
+        showToast(`❌ ${err.message}`);
       }
     }
   },
 
   /**
-   * UI Updates & Modal Builders
+   * UI Helpers
    */
-  updateHeaderProfileUI() {
-    const btnLobby = document.getElementById('btnLobby');
-    if (!btnLobby) return;
-
-    if (this.state.user) {
-      btnLobby.innerHTML = `
-        <img src="${this.state.user.avatar}" class="user-avatar-small" alt="${this.state.user.displayName}" />
-        <span class="user-name-small">${this.state.user.displayName.split(' ')[0]}</span>
-      `;
-      btnLobby.title = `Signed in as ${this.state.user.displayName}`;
-    } else {
-      btnLobby.innerHTML = `👥 Lobbies`;
-      btnLobby.title = `Collaborative Lobbies`;
-    }
-  },
-
-  updateLobbyBannerUI() {
-    let banner = document.getElementById('collabBanner');
-    if (!banner) {
-      banner = document.createElement('div');
-      banner.id = 'collabBanner';
-      banner.className = 'collab-banner';
-      document.body.prepend(banner);
-    }
-
-    if (this.state.isCollaborative && this.state.activeLobby) {
-      banner.style.display = 'flex';
-      banner.innerHTML = `
-        <div class="collab-banner-inner">
-          <div class="collab-status-badge">
-            <span class="pulse-dot"></span> Live Lobby
-          </div>
-          <div class="collab-title">
-            👥 <strong>${this.state.activeLobby.title}</strong>
-            <span class="collab-role-pill role-${this.state.myRole}">${this.state.myRole.toUpperCase()}</span>
-          </div>
-          <div class="collab-actions">
-            <button class="btn btn-sm btn-ghost" id="btnCopyInvite">🔗 Copy Invite Link</button>
-            <button class="btn btn-sm btn-ghost" id="btnSwitchPersonal">📖 Exit to Personal Book</button>
-          </div>
-        </div>
-      `;
-      document.getElementById('btnCopyInvite')?.addEventListener('click', () => this.copyInviteLink());
-      document.getElementById('btnSwitchPersonal')?.addEventListener('click', () => this.switchToPersonalMode());
-    } else {
-      banner.style.display = 'none';
-    }
-  },
-
   openLobbyModal() {
     const modal = document.getElementById('lobbyModal');
     if (modal) {
+      this.renderLobbyListModal();
       modal.classList.add('active');
-      this.renderLobbyModalContent();
+      document.body.style.overflow = 'hidden';
     }
   },
 
   closeLobbyModal() {
     const modal = document.getElementById('lobbyModal');
-    if (modal) modal.classList.remove('active');
-  },
-
-  renderLobbyModalContent() {
-    const container = document.getElementById('lobbyModalBody');
-    if (!container) return;
-
-    if (this.pendingInvite) {
-      container.innerHTML = `
-        <div class="lobby-invite-box">
-          <div class="invite-icon">💌</div>
-          <h3>You're invited to join <strong>"${this.pendingInvite.lobby.title}"</strong>!</h3>
-          <p>${this.pendingInvite.lobby.description || 'Share memories together in real-time.'}</p>
-          ${!this.state.user ? `
-            <div class="guest-login-wrap">
-              <input type="text" id="guestNameInput" class="drive-url-input" placeholder="Enter your display name…" />
-              <button class="btn btn-primary" id="btnGuestJoinInvite">✦ Join Lobby as Guest</button>
-            </div>
-          ` : `
-            <button class="btn btn-primary" id="btnAcceptPendingInvite">Accept Invite & Join →</button>
-          `}
-        </div>
-      `;
-
-      document.getElementById('btnGuestJoinInvite')?.addEventListener('click', async () => {
-        const name = document.getElementById('guestNameInput').value;
-        await this.loginAsGuest(name);
-        if (this.pendingInvite) {
-          await this.joinLobbyByToken(this.pendingInvite.token);
-          this.pendingInvite = null;
-          this.closeLobbyModal();
-        }
-      });
-
-      document.getElementById('btnAcceptPendingInvite')?.addEventListener('click', async () => {
-        if (this.pendingInvite) {
-          await this.joinLobbyByToken(this.pendingInvite.token);
-          this.pendingInvite = null;
-          this.closeLobbyModal();
-        }
-      });
-
-      return;
+    if (modal) {
+      modal.classList.remove('active');
+      document.body.style.overflow = '';
     }
-
-    if (!this.state.user) {
-      container.innerHTML = `
-        <div class="lobby-auth-box">
-          <div class="auth-illustration">🤝</div>
-          <h2>Collaborative Memory Lobbies</h2>
-          <p>Create shared memory albums with friends, family, or partners. Photos and captions sync live across all screens.</p>
-          <div class="guest-login-wrap">
-            <input type="text" id="guestNameInput" class="drive-url-input" placeholder="Enter your display name…" />
-            <button class="btn btn-primary btn-hero-collab" id="btnGuestLogin">✦ Start Collaborating</button>
-          </div>
-        </div>
-      `;
-
-      document.getElementById('btnGuestLogin')?.addEventListener('click', async () => {
-        const name = document.getElementById('guestNameInput').value;
-        await this.loginAsGuest(name);
-        this.renderLobbyModalContent();
-      });
-      return;
-    }
-
-    // Signed in User View (Lobby List + Create New)
-    container.innerHTML = `
-      <div class="lobby-dashboard">
-        <div class="dashboard-header">
-          <div class="user-chip">
-            <img src="${this.state.user.avatar}" class="user-avatar-med" />
-            <div>
-              <strong>${this.state.user.displayName}</strong>
-              <div class="user-email-sub">${this.state.user.email}</div>
-            </div>
-          </div>
-          <button class="btn btn-sm btn-ghost" id="btnCollabSignout">Sign Out</button>
-        </div>
-
-        <div class="create-lobby-card">
-          <h4>✦ Create a New Shared Lobby</h4>
-          <div class="create-lobby-inputs">
-            <input type="text" id="newLobbyTitle" class="drive-url-input" placeholder="Lobby Title (e.g. Summer Vacation '26)" />
-            <input type="text" id="newLobbyDesc" class="drive-url-input" placeholder="Optional description…" />
-            <button class="btn btn-primary" id="btnCreateLobbySubmit">Create Lobby →</button>
-          </div>
-        </div>
-
-        <div class="my-lobbies-section">
-          <h4>Your Shared Lobbies (${this.state.lobbies.length})</h4>
-          <div class="lobbies-grid" id="lobbiesGrid">
-            ${this.state.lobbies.length === 0 ? `<p class="empty-sub">No shared lobbies yet. Create one above!</p>` : ''}
-            ${this.state.lobbies.map(l => `
-              <div class="lobby-card ${this.state.activeLobby?.id === l.id ? 'active-card' : ''}" data-id="${l.id}">
-                <div class="lobby-card-header">
-                  <strong>${l.title}</strong>
-                  <span class="role-badge">${l.yourRole}</span>
-                </div>
-                <p class="lobby-card-desc">${l.description || 'Shared photo gallery'}</p>
-                <div class="lobby-card-footer">
-                  <span>📸 ${l.photoCount || 0} photos</span>
-                  <button class="btn btn-sm btn-ghost btn-open-lobby" data-id="${l.id}">
-                    ${this.state.activeLobby?.id === l.id ? 'Active' : 'Open Lobby →'}
-                  </button>
-                </div>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      </div>
-    `;
-
-    document.getElementById('btnCollabSignout')?.addEventListener('click', () => {
-      this.logout();
-      this.renderLobbyModalContent();
-    });
-
-    document.getElementById('btnCreateLobbySubmit')?.addEventListener('click', async () => {
-      const title = document.getElementById('newLobbyTitle').value;
-      const desc = document.getElementById('newLobbyDesc').value;
-      if (!title || !title.trim()) {
-        if (typeof showToast === 'function') showToast('Please enter a title for your lobby');
-        return;
-      }
-      await this.createLobby(title.trim(), desc.trim());
-      this.closeLobbyModal();
-    });
-
-    document.querySelectorAll('.btn-open-lobby').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        const id = e.currentTarget.getAttribute('data-id');
-        await this.switchToLobby(id);
-        this.closeLobbyModal();
-      });
-    });
   },
 
   renderLobbyListModal() {
-    if (document.getElementById('lobbyModal')?.classList.contains('active')) {
-      this.renderLobbyModalContent();
+    const body = document.getElementById('lobbyModalBody');
+    if (!body) return;
+
+    if (!this.state.user) {
+      body.innerHTML = `
+        <div class="lobby-welcome-box">
+          <h3>👥 Collaborative Memory Lobbies</h3>
+          <p>Join or create shared spaces where you and your friends can add photos, comment, and view memories together in real-time!</p>
+          <div class="lobby-guest-form">
+            <input type="text" id="guestNameInput" placeholder="Enter your display name..." class="captions-search-input" style="margin-bottom:12px;" />
+            <button class="btn btn-primary" id="btnGuestLoginSubmit" style="width:100%;">Join as Guest →</button>
+          </div>
+        </div>
+      `;
+      setTimeout(() => {
+        const btn = document.getElementById('btnGuestLoginSubmit');
+        const inp = document.getElementById('guestNameInput');
+        if (btn && inp) {
+          btn.addEventListener('click', async () => {
+            if (!inp.value.trim()) return;
+            await this.loginAsGuest(inp.value.trim());
+          });
+        }
+      }, 50);
+      return;
     }
-  }
+
+    let lobbiesHtml = '';
+    if (this.state.lobbies.length === 0) {
+      lobbiesHtml = `<div class="captions-empty-msg">You haven't joined any lobbies yet. Create one below!</div>`;
+    } else {
+      lobbiesHtml = this.state.lobbies.map(l => `
+        <div class="caption-row" style="margin-bottom:10px;">
+          <div class="caption-row-info">
+            <div class="caption-row-num"><strong>${l.title}</strong> (${l.photoCount || 0} photos)</div>
+            <div class="caption-row-text">${l.description || 'Shared space'}</div>
+          </div>
+          <button class="btn btn-sm btn-ghost btn-switch-lobby" data-id="${l.id}">Open ↗</button>
+        </div>
+      `).join('');
+    }
+
+    body.innerHTML = `
+      <div class="lobby-user-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <div>Signed in as <strong>${this.state.user.displayName}</strong></div>
+        <button class="btn btn-sm btn-ghost" id="btnCollabLogout">Sign Out</button>
+      </div>
+      <div style="margin-bottom:16px;">
+        <button class="btn btn-primary" id="btnCreateLobbyPrompt" style="width:100%;">+ Create New Memory Lobby</button>
+      </div>
+      ${this.state.isCollaborative ? `
+        <div style="margin-bottom:16px;">
+          <button class="btn btn-ghost" id="btnReturnPersonal" style="width:100%;">📖 Return to Personal Memory Book</button>
+        </div>
+      ` : ''}
+      <h4>Your Lobbies</h4>
+      <div class="lobby-list">${lobbiesHtml}</div>
+    `;
+
+    setTimeout(() => {
+      document.getElementById('btnCollabLogout')?.addEventListener('click', () => this.logout());
+      document.getElementById('btnReturnPersonal')?.addEventListener('click', () => {
+        this.switchToPersonalMode();
+        this.closeLobbyModal();
+      });
+      document.getElementById('btnCreateLobbyPrompt')?.addEventListener('click', async () => {
+        const title = prompt('Lobby Title (e.g., Summer Trip 2026):');
+        if (!title) return;
+        const desc = prompt('Description (optional):', 'Our shared memories');
+        try {
+          await this.createLobby(title, desc || '');
+          this.closeLobbyModal();
+        } catch(e) { alert(e.message); }
+      });
+      document.querySelectorAll('.btn-switch-lobby').forEach(b => {
+        b.addEventListener('click', () => {
+          this.switchToLobby(b.dataset.id);
+          this.closeLobbyModal();
+        });
+      });
+    }, 50);
+  },
+
+  updateHeaderProfileUI() {},
+  updateLobbyBannerUI() {}
 };
 
-window.addEventListener('DOMContentLoaded', () => {
-  CollabEngine.init();
-});
+document.addEventListener('DOMContentLoaded', () => CollabEngine.init());

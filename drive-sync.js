@@ -12,6 +12,7 @@
 const DriveSync = (() => {
 
   // ── Constants ──────────────────────────────────────────────────────────────
+  const DEFAULT_CLIENT_ID = '1067821874986-b2nshqstrck8trlqrf7qmvde7242jnci.apps.googleusercontent.com';
   const SCOPE             = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata';
   const FOLDER_NAME       = 'Mémoire Shared Photos';
   const FILENAME          = 'memoire-session.json';
@@ -19,18 +20,18 @@ const DriveSync = (() => {
   const SAVE_DEBOUNCE_MS  = 3000; // wait 3s after last change before saving
 
   // ── State ──────────────────────────────────────────────────────────────────
-  let _token          = null;   // current OAuth access token
-  let _driveFileId    = null;   // cached Drive file ID for memoire-session.json
-  let _userFolderId   = null;   // cached Drive folder ID for 'Mémoire Shared Photos'
-  let _fetchedClientId = null;  // dynamically fetched Client ID from environment
-  let _saveTimer      = null;   // debounce timer handle
-  let _tokenClient    = null;   // GIS token client instance
-  let _statusCbs      = [];     // status-change subscribers
-  let _status         = 'idle'; // current status string
+  let _token           = null;   // current OAuth access token
+  let _driveFileId     = null;   // cached Drive file ID for memoire-session.json
+  let _userFolderId    = null;   // cached Drive folder ID for 'Mémoire Shared Photos'
+  let _fetchedClientId = null;   // dynamically fetched Client ID from environment
+  let _saveTimer       = null;   // debounce timer handle
+  let _tokenClient     = null;   // GIS token client instance
+  let _statusCbs       = [];     // status-change subscribers
+  let _status          = 'idle'; // current status string
 
   // ── Helper: Get active Client ID ─────────────────────────────────────────
   function getClientId() {
-    return (localStorage.getItem('memoire_oauth_client_id') || _fetchedClientId || '').trim();
+    return (localStorage.getItem('memoire_oauth_client_id') || _fetchedClientId || DEFAULT_CLIENT_ID).trim();
   }
 
   function setClientId(id) {
@@ -64,7 +65,7 @@ const DriveSync = (() => {
         }
       }
     } catch (e) {
-      // Backend offline or unreachable — fallback to stored client ID
+      // Backend offline or unreachable — fallback to stored/default Client ID
     }
 
     const saved = sessionStorage.getItem('memoire_gis_token');
@@ -125,10 +126,10 @@ const DriveSync = (() => {
     if (_token && window.google?.accounts?.oauth2) {
       try { google.accounts.oauth2.revoke(_token, () => {}); } catch(e){}
     }
-    _token       = null;
-    _driveFileId = null;
+    _token        = null;
+    _driveFileId  = null;
     _userFolderId = null;
-    _tokenClient = null;
+    _tokenClient  = null;
     sessionStorage.removeItem('memoire_gis_token');
     setStatus('signed-out', 'Disconnected');
   }
@@ -210,7 +211,6 @@ const DriveSync = (() => {
 
     const cleanFilename = filename || `photo_${Date.now()}.jpg`;
 
-    // Multipart upload payload: metadata + binary blob
     const metadata = {
       name: cleanFilename,
       parents: [folderId],
@@ -392,4 +392,3 @@ const DriveSync = (() => {
   };
 
 })();
-
