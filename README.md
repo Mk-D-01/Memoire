@@ -129,8 +129,24 @@ Mémoire works 100% offline out-of-the-box. To enable Google Drive folder import
 1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
 2. Create a project and enable the **Google Drive API**.
 3. Generate an **API Key** under *APIs & Services → Credentials*.
-4. Open Mémoire, click **Drive** in the top bar, expand **Google Drive API Key**, paste your key, and click **Save**.
-5. Paste any publicly shared Google Drive folder or file link (`Anyone with the link can view`) to import all memories instantly.
+4. Paste any publicly shared Google Drive folder or file link (`Anyone with the link can view`) into the Drive import field.
+
+### Google OAuth for Drive Sync
+
+The **Sign In with Google** button uses Google Identity Services (GIS) to request a Drive access token in the browser. It is separate from the collaborative lobby guest session.
+
+1. In Google Cloud Console, enable **Google Drive API** and configure the OAuth consent screen.
+2. Create an **OAuth client ID** with application type **Web application**.
+3. Add the exact URL used to open the app under **Authorized JavaScript origins**, for example `http://localhost:3000`. Do not use `file://`.
+4. Create `backend/.env` from `backend/.env.example` and set:
+
+  ```env
+  GOOGLE_CLIENT_ID=your_web_client_id.apps.googleusercontent.com
+  ```
+
+5. Start the backend from the `backend` directory with `npm start`, then serve the project over HTTP. The frontend reads the client ID from `GET /auth/config`.
+
+The client ID can also be entered in the Drive modal under **OAuth Client ID**. Never put `GOOGLE_CLIENT_SECRET` in frontend files; the current GIS token flow does not require a client secret or an OAuth callback URL.
 
 ---
 

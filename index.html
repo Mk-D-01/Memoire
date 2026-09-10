@@ -120,36 +120,6 @@
         <div class="drive-sync-status-msg" id="driveSyncStatusMsg">Status: Not connected</div>
       </div>
 
-      <!-- OAuth Client ID section -->
-      <div class="drive-apikey-section" id="driveClientIdSection">
-        <div class="drive-apikey-header" id="driveClientIdToggle">
-          <span class="drive-apikey-label">⚙️ OAuth Client ID <span class="drive-apikey-badge" id="clientIdBadge">default</span></span>
-          <span class="drive-apikey-chevron" id="clientIdChevron">▸</span>
-        </div>
-        <div class="drive-apikey-body" id="driveClientIdBody">
-          <p class="drive-apikey-hint">Google OAuth 2.0 Web Client ID. Overrides backend configuration if specified.</p>
-          <div class="drive-apikey-row">
-            <input type="text" class="drive-apikey-input" id="driveClientIdInput" placeholder="1067821874986-…apps.googleusercontent.com" autocomplete="off" />
-            <button class="drive-apikey-save" id="driveClientIdSave">Save</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- API Key section (needed for folder listing) -->
-      <div class="drive-apikey-section" id="driveApiKeySection">
-        <div class="drive-apikey-header" id="driveApiKeyToggle">
-          <span class="drive-apikey-label">🔑 Google Drive API Key <span class="drive-apikey-badge" id="apiKeyBadge">not set</span></span>
-          <span class="drive-apikey-chevron" id="apiKeyChevron">▸</span>
-        </div>
-        <div class="drive-apikey-body" id="driveApiKeyBody">
-          <p class="drive-apikey-hint">Optional fallback for public folder link parsing. Get a key at <a href="https://console.cloud.google.com/" target="_blank" rel="noopener" class="drive-ext-link">Google Cloud Console</a>.</p>
-          <div class="drive-apikey-row">
-            <input type="password" class="drive-apikey-input" id="driveApiKeyInput" placeholder="AIza…" autocomplete="off" />
-            <button class="drive-apikey-save" id="driveApiKeySave">Save</button>
-          </div>
-        </div>
-      </div>
-
       <!-- URL textarea with live detect badge -->
       <div class="drive-input-wrap">
         <textarea

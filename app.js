@@ -52,11 +52,6 @@ const driveUrlInput      = document.getElementById('driveUrlInput');
 const driveImportBtn     = document.getElementById('driveImportBtn');
 const driveStatus        = document.getElementById('driveStatus');
 const emptyDriveBtn      = document.getElementById('emptyDriveBtn');
-const driveApiKeySection = document.getElementById('driveApiKeySection');
-const driveApiKeyToggle  = document.getElementById('driveApiKeyToggle');
-const driveApiKeyInput   = document.getElementById('driveApiKeyInput');
-const driveApiKeySave    = document.getElementById('driveApiKeySave');
-const apiKeyBadge        = document.getElementById('apiKeyBadge');
 const driveDetectBar     = document.getElementById('driveDetectBar');
 // Captions modal & Suggest & Download
 const captionsModal       = document.getElementById('captionsModal');
@@ -1000,12 +995,6 @@ function spawnAmbientParticles() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function initDriveUI() {
-  const saved = localStorage.getItem(LS_API_KEY) || '';
-  if (saved) {
-    driveApiKeyInput.value = saved;
-    updateApiKeyBadge(true);
-  }
-
   // Initialize DriveSync if available
   if (typeof DriveSync !== 'undefined') {
     DriveSync.init();
@@ -1079,83 +1068,11 @@ function initDriveUI() {
     }
   }
 
-  driveApiKeyToggle.addEventListener('click', () => {
-    driveApiKeySection.classList.toggle('open');
-  });
-
-  driveApiKeySave.addEventListener('click', () => {
-    const key = driveApiKeyInput.value.trim();
-    if (!key) { showToast('⚠ Enter a valid API key first'); return; }
-    localStorage.setItem(LS_API_KEY, key);
-    updateApiKeyBadge(true);
-    driveApiKeySection.classList.remove('open');
-    showToast('🔑 API key saved!');
-  });
-  driveApiKeyInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter') driveApiKeySave.click();
-  });
-
-  // Client ID UI event listeners
-  const driveClientIdSection = document.getElementById('driveClientIdSection');
-  const driveClientIdToggle = document.getElementById('driveClientIdToggle');
-  const driveClientIdInput = document.getElementById('driveClientIdInput');
-  const driveClientIdSave = document.getElementById('driveClientIdSave');
-
-  if (driveClientIdInput && typeof DriveSync !== 'undefined') {
-    const customId = localStorage.getItem('memoire_oauth_client_id') || '';
-    if (customId) {
-      driveClientIdInput.value = customId;
-      updateClientIdBadge('custom');
-    } else {
-      driveClientIdInput.value = DriveSync.getClientId() || '';
-      updateClientIdBadge('active');
-    }
-  }
-
-  if (driveClientIdToggle) {
-    driveClientIdToggle.addEventListener('click', () => {
-      driveClientIdSection.classList.toggle('open');
-    });
-  }
-
-  if (driveClientIdSave) {
-    driveClientIdSave.addEventListener('click', () => {
-      const id = driveClientIdInput.value.trim();
-      if (!id) {
-        DriveSync.setClientId('');
-        showToast('⚙️ Reset to default Client ID');
-        updateClientIdBadge('default');
-      } else {
-        DriveSync.setClientId(id);
-        showToast('⚙️ OAuth Client ID saved!');
-        updateClientIdBadge('custom');
-      }
-      if (driveClientIdSection) driveClientIdSection.classList.remove('open');
-    });
-  }
-
   let detectTimer;
   driveUrlInput.addEventListener('input', () => {
     clearTimeout(detectTimer);
     detectTimer = setTimeout(updateDetectBar, 350);
   });
-}
-
-function updateApiKeyBadge(isSet) {
-  apiKeyBadge.textContent = isSet ? '✓ saved' : 'not set';
-  apiKeyBadge.classList.toggle('set', isSet);
-}
-
-function updateClientIdBadge(mode) {
-  const badge = document.getElementById('clientIdBadge');
-  if (!badge) return;
-  if (mode === 'custom') {
-    badge.textContent = '✓ custom';
-    badge.classList.add('set');
-  } else {
-    badge.textContent = 'active';
-    badge.classList.remove('set');
-  }
 }
 
 function updateDetectBar() {
@@ -1339,8 +1256,7 @@ async function handleDriveImport() {
         return;
       }
       if (!apiKey) {
-        setDriveStatusItem(sid, 'error', 'Folder detected — save your API key above first');
-        driveApiKeySection.classList.add('open');
+        setDriveStatusItem(sid, 'error', 'Folder imports require a Google Drive API key');
         return;
       }
 

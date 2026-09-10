@@ -12,7 +12,7 @@
 const DriveSync = (() => {
 
   // ── Constants ──────────────────────────────────────────────────────────────
-  const DEFAULT_CLIENT_ID = '1067821874986-b2nshqstrck8trlqrf7qmvde7242jnci.apps.googleusercontent.com';
+  const DEFAULT_CLIENT_ID = '384630933703-7cf7e1b7j1ljs1r0michq3grcf09pdsk.apps.googleusercontent.com';
   const SCOPE             = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata';
   const FOLDER_NAME       = 'Mémoire Shared Photos';
   const FILENAME          = 'memoire-session.json';
@@ -54,6 +54,24 @@ const DriveSync = (() => {
 
   function onStatusChange(fn) {
     _statusCbs.push(fn);
+  }
+
+  function waitForGoogleIdentityServices(timeoutMs = 5000) {
+    if (window.google?.accounts?.oauth2) return Promise.resolve(true);
+
+    return new Promise(resolve => {
+      const startedAt = Date.now();
+      const check = () => {
+        if (window.google?.accounts?.oauth2) {
+          resolve(true);
+        } else if (Date.now() - startedAt >= timeoutMs) {
+          resolve(false);
+        } else {
+          setTimeout(check, 100);
+        }
+      };
+      check();
+    });
   }
 
   // ── Initialise ─────────────────────────────────────────────────────────────
@@ -107,15 +125,16 @@ const DriveSync = (() => {
   }
 
   // ── Sign In ────────────────────────────────────────────────────────────────
-  function signIn(afterSignIn) {
+  async function signIn(afterSignIn) {
     let clientId = getClientId();
     if (!clientId || clientId.trim().length < 5) {
       setStatus('error', 'OAuth Client ID not configured');
       return false;
     }
 
-    if (!window.google?.accounts?.oauth2) {
-      setStatus('error', 'Google Identity library still loading — please try again in a moment');
+    setStatus('signing-in', 'Loading Google Sign-In...');
+    if (!await waitForGoogleIdentityServices()) {
+      setStatus('error', 'Google Identity Services could not be loaded. Check your network or content-security policy.');
       return false;
     }
 
