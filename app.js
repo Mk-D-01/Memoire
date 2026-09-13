@@ -571,8 +571,13 @@ async function processFiles(files) {
   });
 
   if (loaded > 0) {
-    // If connected to Google Drive, auto-upload to user's 'Mémoire Shared Photos' folder
-    if (typeof DriveSync !== 'undefined' && DriveSync.isSignedIn) {
+    const inSharedDriveSpace = typeof CollabEngine !== 'undefined'
+      && CollabEngine.state.isCollaborative
+      && CollabEngine.state.activeDriveFolderId;
+
+    // Personal photos use the user's private Mémoire folder. Shared-space photos
+    // are uploaded by CollabEngine to the active lobby folder instead.
+    if (!inSharedDriveSpace && typeof DriveSync !== 'undefined' && DriveSync.isSignedIn) {
       const newlyAdded = photos.slice(-loaded);
       for (const item of newlyAdded) {
         DriveSync.uploadPhotoToDrive(item.dataUrl, item.caption || 'memory.jpg', item.caption)
@@ -1028,6 +1033,9 @@ function initDriveUI() {
         } else {
           DriveSync.signIn(async () => {
             showToast('☁️ Connected to Google Drive!');
+              if (typeof CollabEngine !== 'undefined' && CollabEngine.state.activeDriveFolderId) {
+                await CollabEngine.fetchLobbyPhotos(CollabEngine.state.activeLobby.id);
+              }
             renderUI();
           });
         }
@@ -1218,6 +1226,7 @@ async function importSingleFile(fileId, sid, fileName) {
   photos.push({
     id     : `drive_${fileId}_${Date.now()}`,
     dataUrl,
+    filename: fileName || 'memory.jpg',
     caption: generateAutoCaption(fileName || '', Date.now()),
     addedAt: Date.now(),
     source : 'google_drive',
@@ -1239,6 +1248,7 @@ async function handleDriveImport() {
   driveImportBtn.textContent = 'Importing…';
 
   let successCount = 0;
+  const existingPhotoIds = new Set(photos.map(photo => photo.id));
 
   const tasks = lines.map(async (line, idx) => {
     const sid  = `ln_${idx}`;
@@ -1313,8 +1323,21 @@ async function handleDriveImport() {
   driveImportBtn.textContent = 'Import Photos →';
 
   if (successCount > 0) {
-    saveToStorage();
-    renderUI();
+    const importedPhotos = photos.filter(photo => !existingPhotoIds.has(photo.id));
+    if (typeof CollabEngine !== 'undefined' && CollabEngine.state.isCollaborative) {
+      const uploaded = await CollabEngine.uploadLobbyPhotos(importedPhotos.map(photo => ({
+        dataUrl: photo.dataUrl,
+        filename: photo.filename || 'memory.jpg',
+        caption: photo.caption,
+        size: photo.dataUrl.length
+      })));
+      if (uploaded) {
+        await CollabEngine.fetchLobbyPhotos(CollabEngine.state.activeLobby.id);
+      }
+    } else {
+      saveToStorage();
+      renderUI();
+    }
     showToast(`📁 ${successCount} Drive ${successCount === 1 ? 'photo' : 'photos'} imported!`);
     if (successCount === lines.length || lines.length === 1) {
       setTimeout(() => closeDriveModal(), 1800);

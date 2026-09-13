@@ -48,21 +48,28 @@ router.post('/upload', verifyAuth, async (req, res) => {
     if (!photos || !Array.isArray(photos) || photos.length === 0) {
       return res.status(400).json({ error: 'No photos provided' });
     }
+    if (photos.length > 50) {
+      return res.status(413).json({ error: 'You can upload at most 50 photos at once' });
+    }
 
     const insertedPhotos = [];
     const now = Date.now();
 
     for (const item of photos) {
       if (!item.dataUrl) continue;
+      if (typeof item.dataUrl !== 'string' || !item.dataUrl.startsWith('data:image/')) continue;
+      if (item.dataUrl.length > 15 * 1024 * 1024) {
+        return res.status(413).json({ error: 'Each photo must be smaller than 15 MB after compression' });
+      }
       const photoId = `img_${now}_${crypto.randomBytes(4).toString('hex')}`;
       const filename = item.filename || 'memory.jpg';
       const caption = item.caption || '';
       const size = item.size || item.dataUrl.length;
 
       await dbAsync.run(
-        `INSERT INTO photos (id, lobbyId, filename, caption, dataUrl, size, uploadedBy, uploaderName, uploaderAvatar, uploadedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [photoId, lobbyId, filename, caption, item.dataUrl, size, req.user.id, req.user.displayName, req.user.avatar, now]
+        `INSERT INTO photos (id, lobbyId, filename, caption, dataUrl, size, uploadedBy, uploaderName, uploaderAvatar, uploadedAt, driveFileId)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [photoId, lobbyId, filename, caption, item.dataUrl, size, req.user.id, req.user.displayName, req.user.avatar, now, item.driveFileId || null]
       );
 
       const newPhoto = await dbAsync.get(`SELECT * FROM photos WHERE id = ?`, [photoId]);

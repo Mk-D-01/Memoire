@@ -6,23 +6,25 @@
  * and syncs collaborative photo galleries.
  *
  * Uses Google Identity Services (GIS) token model — no redirect popup flow.
- * Scopes: drive.file, drive.appdata
+ * Scopes: drive, drive.appdata
  */
 
 const DriveSync = (() => {
 
   // ── Constants ──────────────────────────────────────────────────────────────
   const DEFAULT_CLIENT_ID = '384630933703-7cf7e1b7j1ljs1r0michq3grcf09pdsk.apps.googleusercontent.com';
-  const SCOPE             = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata';
+  const SCOPE             = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/drive.appdata';
   const FOLDER_NAME       = 'Mémoire Shared Photos';
   const FILENAME          = 'memoire-session.json';
   const MIME_JSON         = 'application/json';
+  const TOKEN_KEY         = 'memoire_gis_token_v2';
   const SAVE_DEBOUNCE_MS  = 3000; // wait 3s after last change before saving
 
   // ── State ──────────────────────────────────────────────────────────────────
   let _token           = null;   // current OAuth access token
   let _driveFileId     = null;   // cached Drive file ID for memoire-session.json
   let _userFolderId    = null;   // cached Drive folder ID for 'Mémoire Shared Photos'
+  let _sharedFolderId  = null;   // active collaborative folder ID
   let _fetchedClientId = null;   // dynamically fetched Client ID from environment
   let _saveTimer       = null;   // debounce timer handle
   let _tokenClient     = null;   // GIS token client instance
@@ -90,7 +92,7 @@ const DriveSync = (() => {
       // Backend offline or unreachable — fallback to default Client ID
     }
 
-    const saved = sessionStorage.getItem('memoire_gis_token');
+    const saved = sessionStorage.getItem(TOKEN_KEY);
     if (saved) {
       _token = saved;
       setStatus('signed-in', 'Connected to Google Drive');
@@ -112,7 +114,7 @@ const DriveSync = (() => {
           return;
         }
         _token = resp.access_token;
-        sessionStorage.setItem('memoire_gis_token', _token);
+        sessionStorage.setItem(TOKEN_KEY, _token);
         setStatus('signed-in', 'Connected to Google Drive');
         try {
           await ensureDriveFolder();
@@ -156,7 +158,9 @@ const DriveSync = (() => {
     _token        = null;
     _driveFileId  = null;
     _userFolderId = null;
+    _sharedFolderId = null;
     _tokenClient  = null;
+    sessionStorage.removeItem(TOKEN_KEY);
     sessionStorage.removeItem('memoire_gis_token');
     setStatus('signed-out', 'Disconnected');
   }
@@ -171,7 +175,7 @@ const DriveSync = (() => {
     });
     if (resp.status === 401) {
       _token = null;
-      sessionStorage.removeItem('memoire_gis_token');
+      sessionStorage.removeItem(TOKEN_KEY);
       setStatus('signed-out', 'Session expired — please sign in again');
       throw new Error('Token expired');
     }
@@ -268,33 +272,109 @@ const DriveSync = (() => {
     };
   }
 
+  function setSharedFolder(folderId) {
+    _sharedFolderId = folderId || null;
+  }
+
+  async function createSharedFolder(name) {
+    if (!_token) throw new Error('Connect Google Drive before creating a shared space');
+
+    const createRes = await _fetch(
+      'POST',
+      'https://www.googleapis.com/drive/v3/files?supportsAllDrives=true&fields=id,name,webViewLink',
+      JSON.stringify({ name: name || 'Mémoire Shared Space', mimeType: 'application/vnd.google-apps.folder' }),
+      { 'Content-Type': MIME_JSON }
+    );
+    if (!createRes.ok) throw new Error('Google Drive could not create the shared folder');
+    const folder = await createRes.json();
+    _sharedFolderId = folder.id;
+
+    const permissionRes = await _fetch(
+      'POST',
+      `https://www.googleapis.com/drive/v3/files/${folder.id}/permissions?supportsAllDrives=true&sendNotificationEmail=false`,
+      JSON.stringify({ type: 'anyone', role: 'writer' }),
+      { 'Content-Type': MIME_JSON }
+    );
+    if (!permissionRes.ok) {
+      setStatus('signed-in', 'Folder created; share it from Google Drive before inviting contributors');
+    }
+
+    return { ...folder, folderId: folder.id };
+  }
+
+  async function uploadPhotoToFolder(folderId, photoDataUrlOrBlob, filename, caption = '') {
+    if (!_token) throw new Error('Connect Google Drive before uploading');
+    if (!folderId) throw new Error('Shared Drive folder is not configured');
+
+    const imageBlob = typeof photoDataUrlOrBlob === 'string'
+      ? dataURLtoBlob(photoDataUrlOrBlob)
+      : photoDataUrlOrBlob;
+    const metadata = {
+      name: filename || `photo_${Date.now()}.jpg`,
+      parents: [folderId],
+      description: caption || ''
+    };
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: MIME_JSON }));
+    form.append('file', imageBlob);
+    const res = await _fetch(
+      'POST',
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,name,description,createdTime,webViewLink',
+      form
+    );
+    if (!res.ok) throw new Error('Google Drive rejected the photo upload');
+    return res.json();
+  }
+
+  async function deleteDriveFile(fileId) {
+    if (!_token || !fileId) return;
+    const res = await _fetch('DELETE', `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`);
+    if (!res.ok && res.status !== 404) throw new Error('Google Drive could not delete the photo');
+  }
+
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function downloadDriveImage(fileId) {
+    const res = await _fetch('GET', `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
+    if (!res.ok) throw new Error('Google Drive could not load the photo');
+    return blobToDataUrl(await res.blob());
+  }
+
   // ── Fetch Photos & Captions from Google Drive Folder ────────────────────────
-  async function fetchFolderPhotos() {
+  async function fetchFolderPhotos(folderId = _userFolderId) {
     if (!_token) return [];
-    const folderId = await ensureDriveFolder();
+    const activeFolderId = folderId || await ensureDriveFolder();
     setStatus('syncing', 'Fetching photos from Google Drive folder...');
 
     try {
-      const q = encodeURIComponent(`'${folderId}' in parents and mimeType contains 'image/' and trashed=false`);
+      const q = encodeURIComponent(`'${activeFolderId}' in parents and mimeType contains 'image/' and trashed=false`);
       const res = await _fetch('GET',
-        `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,description,thumbnailLink,webContentLink,webViewLink,createdTime)&pageSize=100&orderBy=createdTime desc`
+        `https://www.googleapis.com/drive/v3/files?q=${q}&supportsAllDrives=true&includeItemsFromAllDrives=true&fields=files(id,name,description,mimeType,thumbnailLink,webContentLink,webViewLink,createdTime)&pageSize=100&orderBy=createdTime desc`
       );
+      if (!res.ok) throw new Error('Google Drive could not list this shared folder');
       const data = await res.json();
       const files = data.files || [];
 
       setStatus('signed-in', `Retrieved ${files.length} photo(s) from Drive`);
 
-      return files.map(file => ({
-        id: `drive_${file.id}`,
-        driveFileId: file.id,
-        filename: file.name,
-        caption: file.description || '',
-        dataUrl: file.webContentLink || file.thumbnailLink || '',
-        thumbnailLink: file.thumbnailLink,
-        webViewLink: file.webViewLink,
-        addedAt: new Date(file.createdTime).getTime(),
-        source: 'google_drive'
-      }));
+      return Promise.all(files.map(async file => ({
+          id: `drive_${file.id}`,
+          driveFileId: file.id,
+          filename: file.name,
+          caption: file.description || '',
+          dataUrl: await downloadDriveImage(file.id),
+          thumbnailLink: file.thumbnailLink,
+          webViewLink: file.webViewLink,
+          addedAt: new Date(file.createdTime).getTime(),
+          source: 'google_drive'
+        })));
     } catch (err) {
       console.error('Fetch Drive folder photos failed:', err);
       setStatus('error', `Drive fetch error: ${err.message}`);
@@ -409,6 +489,10 @@ const DriveSync = (() => {
     estimateSizeMB,
     ensureDriveFolder,
     uploadPhotoToDrive,
+    createSharedFolder,
+    setSharedFolder,
+    uploadPhotoToFolder,
+    deleteDriveFile,
     fetchFolderPhotos,
     updateDrivePhotoCaption,
     getClientId,

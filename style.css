@@ -1980,6 +1980,49 @@ body {
   background: rgba(255, 255, 255, 0.07);
 }
 
+.lobby-share-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid rgba(245, 201, 138, 0.28);
+  border-radius: var(--radius-sm);
+  background: rgba(245, 201, 138, 0.07);
+}
+
+.lobby-share-panel strong {
+  color: var(--accent-primary);
+}
+
+.lobby-share-panel p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.lobby-share-row {
+  display: flex;
+  gap: 8px;
+}
+
+.lobby-share-row input {
+  min-width: 0;
+  flex: 1;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--text-primary);
+  font-size: 0.76rem;
+}
+
+@media (max-width: 520px) {
+  .lobby-share-row {
+    flex-direction: column;
+  }
+}
+
 .lobby-card.active-card {
   border-color: var(--accent-primary);
   box-shadow: 0 0 12px rgba(192, 132, 252, 0.2);

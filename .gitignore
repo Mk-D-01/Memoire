@@ -17,3 +17,7 @@ backend/memoire.db
 Thumbs.db
 .idea/
 .vscode/
+
+.env
+backend/.env
+backend/memoire.db
