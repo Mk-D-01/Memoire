@@ -8,7 +8,7 @@ const router = express.Router();
 // 1. Create a New Lobby
 router.post('/', verifyAuth, async (req, res) => {
   try {
-    const { title, description, isPublic } = req.body;
+    const { title, description, isPublic, driveFolderId } = req.body;
     if (!title || !title.trim()) {
       return res.status(400).json({ error: 'Lobby title is required' });
     }
@@ -19,9 +19,9 @@ router.post('/', verifyAuth, async (req, res) => {
 
     // Create Lobby
     await dbAsync.run(
-      `INSERT INTO lobbies (id, title, description, createdBy, createdAt, isPublic, photoCount, lastUpdatedAt) 
-       VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
-      [lobbyId, title.trim(), description || '', req.user.id, now, publicFlag, now]
+      `INSERT INTO lobbies (id, title, description, createdBy, createdAt, driveFolderId, isPublic, photoCount, lastUpdatedAt) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+      [lobbyId, title.trim(), description || '', req.user.id, now, driveFolderId || null, publicFlag, now]
     );
 
     // Add Creator as Admin Member
@@ -124,12 +124,14 @@ router.post('/:lobbyId/invites', verifyAuth, async (req, res) => {
     const inviteId = `inv_${crypto.randomBytes(8).toString('hex')}`;
     const token = crypto.randomBytes(8).toString('hex');
     const now = Date.now();
-    const role = defaultRole || 'editor';
+    const role = ['editor', 'viewer'].includes(defaultRole) ? defaultRole : 'editor';
+    const normalizedMaxUses = Number.isInteger(maxUses) && maxUses > 0 ? maxUses : null;
+    const normalizedExpiresAt = Number.isInteger(expiresAt) && expiresAt > now ? expiresAt : null;
 
     await dbAsync.run(
       `INSERT INTO invites (id, lobbyId, token, createdBy, createdAt, expiresAt, maxUses, defaultRole)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [inviteId, lobbyId, token, req.user.id, now, expiresAt || null, maxUses || null, role]
+      [inviteId, lobbyId, token, req.user.id, now, normalizedExpiresAt, normalizedMaxUses, role]
     );
 
     const invite = await dbAsync.get(`SELECT * FROM invites WHERE id = ?`, [inviteId]);
@@ -183,6 +185,14 @@ router.post('/accept-invite/:token', verifyAuth, async (req, res) => {
     if (existing) {
       const lobby = await dbAsync.get(`SELECT * FROM lobbies WHERE id = ?`, [invite.lobbyId]);
       return res.json({ message: 'Already a member', lobby, role: existing.role });
+    }
+
+    if (invite.expiresAt && Date.now() > invite.expiresAt) {
+      return res.status(410).json({ error: 'Invite link has expired' });
+    }
+
+    if (invite.maxUses && invite.usedCount >= invite.maxUses) {
+      return res.status(410).json({ error: 'Invite link maximum usages reached' });
     }
 
     const memberId = `mem_${crypto.randomBytes(8).toString('hex')}`;

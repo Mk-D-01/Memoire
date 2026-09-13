@@ -21,6 +21,8 @@ A domain cannot be created from inside this repository. Buy or assign one, point
 
 1. Create or select a Google Cloud project.
 2. Enable **Google Drive API**. The current app also loads Google Identity Services in the browser.
+   - Shared spaces require the sensitive OAuth scope `https://www.googleapis.com/auth/drive`.
+   - Each collaborator must authorize Drive access before viewing or uploading to a private shared folder.
 3. Configure **OAuth consent screen**:
    - App name: `Mémoire`
    - User support email: your support email
@@ -43,7 +45,7 @@ A domain cannot be created from inside this repository. Buy or assign one, point
 
 ### Static PWA only
 
-The core photo journal can be hosted as static files on Firebase Hosting, Cloud Storage website hosting behind a load balancer, or another static host. It does not need the Node backend.
+The core photo journal and backend-free Drive Spaces can be hosted as static files on Vercel, Firebase Hosting, or Cloud Storage website hosting. They do not need the Node backend. Shared Drive links use the format `https://your-domain.example/?driveFolder=FOLDER_ID`.
 
 ### Collaboration enabled
 
@@ -72,4 +74,5 @@ The backend must restrict CORS to the production web origin. Do not use `origin:
 - [ ] Confirm `.env` and `backend/.env` are not committed or uploaded.
 - [ ] Add the production origin to OAuth and CORS configuration.
 - [ ] Test Google sign-in and Drive access on the production HTTPS origin.
+- [ ] Complete Google's OAuth verification if the app is public and requests the full Drive scope.
 - [ ] Test the privacy policy and terms links on desktop and mobile.

@@ -12,6 +12,10 @@ const CollabEngine = {
     token: localStorage.getItem('memoire_collab_token') || null,
     user: null,
     activeLobby: null,
+    activeInviteToken: null,
+    activeDriveFolderId: null,
+    driveSyncTimer: null,
+    driveOnly: false,
     myRole: 'viewer', // 'admin', 'editor', 'viewer'
     socket: null,
     lobbies: []
@@ -21,11 +25,13 @@ const CollabEngine = {
    * Initialize collaborative system, check authentication and URL query parameters
    */
   async init() {
-    if (this.state.token) {
+    const urlParams = new URLSearchParams(window.location.search);
+    const driveFolderId = urlParams.get('driveFolder');
+    if (driveFolderId) {
+      this.activateDriveSpace(driveFolderId, false);
+    } else if (this.state.token) {
       await this.fetchProfile();
     }
-
-    const urlParams = new URLSearchParams(window.location.search);
     const inviteToken = urlParams.get('invite');
     if (inviteToken) {
       this.handleInviteFromUrl(inviteToken);
@@ -90,6 +96,11 @@ const CollabEngine = {
     this.state.token = null;
     this.state.user = null;
     this.state.activeLobby = null;
+    this.state.activeInviteToken = null;
+    this.state.activeDriveFolderId = null;
+    this.state.driveOnly = false;
+    clearInterval(this.state.driveSyncTimer);
+    this.state.driveSyncTimer = null;
     this.state.isCollaborative = false;
     localStorage.removeItem('memoire_collab_token');
     if (this.state.socket) {
@@ -132,19 +143,64 @@ const CollabEngine = {
     if (!this.state.token) {
       throw new Error('Must be signed in to create a lobby');
     }
+    if (typeof DriveSync === 'undefined' || !DriveSync.isSignedIn) {
+      throw new Error('Connect Google Drive first so this space can use a shared Drive folder');
+    }
+    const folder = await DriveSync.createSharedFolder(`Mémoire — ${title.trim()}`);
     const res = await fetch(`${API_BASE}/lobbies`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.state.token}`
       },
-      body: JSON.stringify({ title, description, isPublic })
+      body: JSON.stringify({ title, description, isPublic, driveFolderId: folder.folderId })
     });
     if (!res.ok) throw new Error('Failed to create lobby');
     const data = await res.json();
+    this.state.activeInviteToken = data.inviteToken || null;
     await this.loadUserLobbies();
     await this.switchToLobby(data.lobby.id);
     return data;
+  },
+
+  async createDriveSpace() {
+    if (typeof DriveSync === 'undefined' || !DriveSync.isSignedIn) {
+      showToast('Connect Google Drive first, then create the shared space.');
+      document.getElementById('btnDriveImport')?.click();
+      return;
+    }
+    const title = prompt('Shared space name:', 'Our Shared Memories');
+    if (!title?.trim()) return;
+    try {
+      const folder = await DriveSync.createSharedFolder(`Mémoire — ${title.trim()}`);
+      await this.activateDriveSpace(folder.folderId, true, title.trim());
+    } catch (err) {
+      showToast(`❌ ${err.message}`);
+    }
+  },
+
+  async activateDriveSpace(folderId, updateUrl = true, title = 'Shared Drive Space') {
+    if (!folderId) return;
+    this.state.driveOnly = true;
+    this.state.isCollaborative = true;
+    this.state.activeDriveFolderId = folderId;
+    this.state.activeLobby = { id: `drive_${folderId}`, title, driveFolderId: folderId };
+    if (typeof DriveSync !== 'undefined') DriveSync.setSharedFolder(folderId);
+
+    if (updateUrl) {
+      const url = new URL(window.location.href);
+      url.search = '';
+      url.searchParams.set('driveFolder', folderId);
+      window.history.replaceState({}, '', url);
+    }
+
+    await this.fetchLobbyPhotos(this.state.activeLobby.id);
+    clearInterval(this.state.driveSyncTimer);
+    this.state.driveSyncTimer = setInterval(
+      () => this.fetchLobbyPhotos(this.state.activeLobby.id),
+      15000
+    );
+    this.renderLobbyListModal();
   },
 
   /**
@@ -185,10 +241,20 @@ const CollabEngine = {
 
       this.state.activeLobby = data.lobby;
       this.state.myRole = data.yourRole;
+      this.state.activeInviteToken = data.invites?.[0]?.token || this.state.activeInviteToken;
+      this.state.activeDriveFolderId = data.lobby.driveFolderId || null;
       this.state.isCollaborative = true;
+
+      if (this.state.activeDriveFolderId && typeof DriveSync !== 'undefined') {
+        DriveSync.setSharedFolder(this.state.activeDriveFolderId);
+      }
 
       this.connectSocket(lobbyId);
       await this.fetchLobbyPhotos(lobbyId);
+      clearInterval(this.state.driveSyncTimer);
+      if (this.state.activeDriveFolderId) {
+        this.state.driveSyncTimer = setInterval(() => this.fetchLobbyPhotos(lobbyId), 15000);
+      }
       this.updateLobbyBannerUI();
 
       if (typeof showToast === 'function') {
@@ -208,6 +274,11 @@ const CollabEngine = {
     }
     this.state.isCollaborative = false;
     this.state.activeLobby = null;
+    this.state.activeInviteToken = null;
+    this.state.activeDriveFolderId = null;
+    this.state.driveOnly = false;
+    clearInterval(this.state.driveSyncTimer);
+    this.state.driveSyncTimer = null;
     this.updateLobbyBannerUI();
     if (typeof loadFromIDB === 'function') {
       loadFromIDB().then(() => {
@@ -224,6 +295,17 @@ const CollabEngine = {
    */
   async fetchLobbyPhotos(lobbyId) {
     try {
+      if (this.state.activeDriveFolderId) {
+        if (typeof DriveSync === 'undefined' || !DriveSync.isSignedIn) {
+          throw new Error('Connect Google Drive to view this shared space');
+        }
+        const drivePhotos = await DriveSync.fetchFolderPhotos(this.state.activeDriveFolderId);
+        if (typeof photos !== 'undefined') {
+          photos = drivePhotos;
+          if (typeof renderUI === 'function') renderUI();
+        }
+        return;
+      }
       const res = await fetch(`${API_BASE}/lobbies/${lobbyId}/photos`, {
         headers: { 'Authorization': `Bearer ${this.state.token}` }
       });
@@ -234,9 +316,11 @@ const CollabEngine = {
         photos = data.photos.map(p => ({
           id: p.id,
           dataUrl: p.dataUrl,
+          filename: p.filename,
           caption: p.caption || '',
           uploadedBy: p.uploaderName || 'Anonymous',
           uploadedAvatar: p.uploaderAvatar,
+          driveFileId: p.driveFileId,
           addedAt: p.uploadedAt
         }));
         if (typeof renderUI === 'function') renderUI();
@@ -250,8 +334,24 @@ const CollabEngine = {
    * Upload Photos to Active Lobby Server & User's Google Drive Folder
    */
   async uploadLobbyPhotos(photoArray) {
-    if (!this.state.activeLobby || !this.state.token) return false;
+    if (!this.state.activeLobby || (!this.state.token && !this.state.driveOnly)) return false;
     try {
+      if (this.state.activeDriveFolderId) {
+        if (typeof DriveSync === 'undefined' || !DriveSync.isSignedIn) {
+          throw new Error('Connect Google Drive before uploading to this shared space');
+        }
+        for (const item of photoArray) {
+          const drivePhoto = await DriveSync.uploadPhotoToFolder(
+            this.state.activeDriveFolderId,
+            item.dataUrl,
+            item.filename,
+            item.caption
+          );
+          item.driveFileId = drivePhoto.id;
+        }
+        await this.fetchLobbyPhotos(this.state.activeLobby.id);
+        return true;
+      }
       if (typeof DriveSync !== 'undefined' && DriveSync.isSignedIn) {
         for (const item of photoArray) {
           try {
@@ -286,15 +386,50 @@ const CollabEngine = {
     }
   },
 
+  getShareUrl() {
+    if (this.state.driveOnly && this.state.activeDriveFolderId) {
+      const url = new URL(window.location.href);
+      url.search = '';
+      url.searchParams.set('driveFolder', this.state.activeDriveFolderId);
+      return url.toString();
+    }
+    if (!this.state.activeInviteToken) return '';
+    const url = new URL(window.location.href);
+    url.search = '';
+    url.hash = '';
+    url.searchParams.set('invite', this.state.activeInviteToken);
+    return url.toString();
+  },
+
+  async copyShareUrl() {
+    const shareUrl = this.getShareUrl();
+    if (!shareUrl) return;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      showToast('🔗 Join link copied!');
+    } catch (err) {
+      const input = document.getElementById('lobbyShareUrl');
+      if (!input) return;
+      input.focus();
+      input.select();
+      document.execCommand('copy');
+      showToast('🔗 Join link copied!');
+    }
+  },
+
   /**
    * Edit Caption on Server and Google Drive
    */
   async updatePhotoCaption(photoId, caption) {
-    if (!this.state.activeLobby || !this.state.token) return;
+    if (!this.state.activeLobby || (!this.state.token && !this.state.driveOnly)) return;
     try {
       const item = typeof photos !== 'undefined' ? photos.find(p => p.id === photoId) : null;
       if (item && item.driveFileId && typeof DriveSync !== 'undefined' && DriveSync.isSignedIn) {
-        DriveSync.updateDrivePhotoCaption(item.driveFileId, caption);
+        await DriveSync.updateDrivePhotoCaption(item.driveFileId, caption);
+      }
+      if (this.state.activeDriveFolderId) {
+        await this.fetchLobbyPhotos(this.state.activeLobby.id);
+        return;
       }
 
       await fetch(`${API_BASE}/lobbies/${this.state.activeLobby.id}/photos/${photoId}`, {
@@ -314,8 +449,16 @@ const CollabEngine = {
    * Delete Photo on Server
    */
   async deletePhoto(photoId) {
-    if (!this.state.activeLobby || !this.state.token) return false;
+    if (!this.state.activeLobby || (!this.state.token && !this.state.driveOnly)) return false;
     try {
+      const item = typeof photos !== 'undefined' ? photos.find(p => p.id === photoId) : null;
+      if (this.state.activeDriveFolderId) {
+        if (!item?.driveFileId) throw new Error('Drive file not found');
+        await DriveSync.deleteDriveFile(item.driveFileId);
+        photos = photos.filter(photo => photo.id !== photoId);
+        if (typeof renderUI === 'function') renderUI();
+        return true;
+      }
       const res = await fetch(`${API_BASE}/lobbies/${this.state.activeLobby.id}/photos/${photoId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${this.state.token}` }
@@ -446,26 +589,47 @@ const CollabEngine = {
     const body = document.getElementById('lobbyModalBody');
     if (!body) return;
 
+    if (this.state.driveOnly) {
+      body.innerHTML = `
+        <div class="lobby-welcome-box">
+          <h3>☁️ ${this.escapeHtml(this.state.activeLobby?.title || 'Shared Drive Space')}</h3>
+          <p>Photos are stored directly in the shared Google Drive folder. Everyone with Drive access can add and view memories.</p>
+          <div class="lobby-share-panel">
+            <strong>Share this space</strong>
+            <div class="lobby-share-row">
+              <input id="lobbyShareUrl" type="text" value="${this.escapeHtml(this.getShareUrl())}" readonly aria-label="Shared Drive space link" />
+              <button class="btn btn-sm btn-primary" id="btnCopyLobbyLink" type="button">Copy link</button>
+            </div>
+          </div>
+          <button class="btn btn-ghost" id="btnCreateAnotherDriveSpace" type="button" style="width:100%;">+ Create another space</button>
+        </div>
+      `;
+      setTimeout(() => {
+        document.getElementById('btnCopyLobbyLink')?.addEventListener('click', () => this.copyShareUrl());
+        document.getElementById('btnCreateAnotherDriveSpace')?.addEventListener('click', () => this.createDriveSpace());
+      }, 50);
+      return;
+    }
+
     if (!this.state.user) {
       body.innerHTML = `
         <div class="lobby-welcome-box">
-          <h3>👥 Collaborative Memory Lobbies</h3>
-          <p>Join or create shared spaces where you and your friends can add photos, comment, and view memories together in real-time!</p>
+          <h3>☁️ Shared Google Drive Spaces</h3>
+          <p>Create a shared Drive folder or open a shared-space link. No Mémoire backend is required.</p>
           <div class="lobby-guest-form">
-            <input type="text" id="guestNameInput" placeholder="Enter your display name..." class="captions-search-input" style="margin-bottom:12px;" />
-            <button class="btn btn-primary" id="btnGuestLoginSubmit" style="width:100%;">Join as Guest →</button>
+            <button class="btn btn-primary" id="btnCreateDriveSpace" style="width:100%;">+ Create Shared Drive Space</button>
+            <button class="btn btn-ghost" id="btnOpenDriveSpace" style="width:100%; margin-top:10px;">Open Drive Folder Link</button>
           </div>
         </div>
       `;
       setTimeout(() => {
-        const btn = document.getElementById('btnGuestLoginSubmit');
-        const inp = document.getElementById('guestNameInput');
-        if (btn && inp) {
-          btn.addEventListener('click', async () => {
-            if (!inp.value.trim()) return;
-            await this.loginAsGuest(inp.value.trim());
-          });
-        }
+        document.getElementById('btnCreateDriveSpace')?.addEventListener('click', () => this.createDriveSpace());
+        document.getElementById('btnOpenDriveSpace')?.addEventListener('click', async () => {
+          const input = prompt('Paste the Google Drive folder link or folder ID:');
+          const match = input?.match(/(?:folders\/|id=)([a-zA-Z0-9_-]{10,})/) || input?.match(/^([a-zA-Z0-9_-]{10,})$/);
+          if (match) await this.activateDriveSpace(match[1], true);
+          else if (input) showToast('That is not a valid Google Drive folder link.');
+        });
       }, 50);
       return;
     }
@@ -476,9 +640,9 @@ const CollabEngine = {
     } else {
       lobbiesHtml = this.state.lobbies.map(l => `
         <div class="caption-row" style="margin-bottom:10px;">
-          <div class="caption-row-info">
-            <div class="caption-row-num"><strong>${l.title}</strong> (${l.photoCount || 0} photos)</div>
-            <div class="caption-row-text">${l.description || 'Shared space'}</div>
+          <div class="caption-row-info lobby-row-info">
+            <div class="caption-row-num"><strong>${this.escapeHtml(l.title)}</strong> (${l.photoCount || 0} photos)</div>
+            <div class="caption-row-text">${this.escapeHtml(l.description || 'Shared space')}</div>
           </div>
           <button class="btn btn-sm btn-ghost btn-switch-lobby" data-id="${l.id}">Open ↗</button>
         </div>
@@ -491,9 +655,19 @@ const CollabEngine = {
         <button class="btn btn-sm btn-ghost" id="btnCollabLogout">Sign Out</button>
       </div>
       <div style="margin-bottom:16px;">
-        <button class="btn btn-primary" id="btnCreateLobbyPrompt" style="width:100%;">+ Create New Memory Lobby</button>
+        <button class="btn btn-primary" id="btnCreateLobbyPrompt" style="width:100%;">+ Create Shared Drive Space</button>
       </div>
-      ${this.state.isCollaborative ? `
+      ${this.state.isCollaborative && this.state.activeInviteToken ? `
+        <div class="lobby-share-panel">
+          <div>
+            <strong>Share this memory space</strong>
+            <p>Anyone with this link can join as an editor and add photos.</p>
+          </div>
+          <div class="lobby-share-row">
+            <input id="lobbyShareUrl" type="text" value="${this.escapeHtml(this.getShareUrl())}" readonly aria-label="Lobby join link" />
+            <button class="btn btn-sm btn-primary" id="btnCopyLobbyLink" type="button">Copy link</button>
+          </div>
+        </div>
         <div style="margin-bottom:16px;">
           <button class="btn btn-ghost" id="btnReturnPersonal" style="width:100%;">📖 Return to Personal Memory Book</button>
         </div>
@@ -504,6 +678,7 @@ const CollabEngine = {
 
     setTimeout(() => {
       document.getElementById('btnCollabLogout')?.addEventListener('click', () => this.logout());
+      document.getElementById('btnCopyLobbyLink')?.addEventListener('click', () => this.copyShareUrl());
       document.getElementById('btnReturnPersonal')?.addEventListener('click', () => {
         this.switchToPersonalMode();
         this.closeLobbyModal();
@@ -524,6 +699,15 @@ const CollabEngine = {
         });
       });
     }, 50);
+  },
+
+  escapeHtml(value) {
+    return String(value)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
   },
 
   updateHeaderProfileUI() {},

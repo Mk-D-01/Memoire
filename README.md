@@ -117,6 +117,8 @@ npx serve .
 
 Open `http://localhost:3000` in your browser.
 
+For production deployment, see [DEPLOY_VERCEL.md](DEPLOY_VERCEL.md). Vercel hosts the static frontend; the collaborative Express and Socket.IO backend must run separately on a WebSocket-capable service.
+
 ### Option 2: Direct Browser Launch
 You can also open `index.html` directly in modern browsers (Chrome, Edge, Firefox, Safari).
 
@@ -146,7 +148,7 @@ The **Sign In with Google** button uses Google Identity Services (GIS) to reques
 
 5. Start the backend from the `backend` directory with `npm start`, then serve the project over HTTP. The frontend reads the client ID from `GET /auth/config`.
 
-The client ID can also be entered in the Drive modal under **OAuth Client ID**. Never put `GOOGLE_CLIENT_SECRET` in frontend files; the current GIS token flow does not require a client secret or an OAuth callback URL.
+The collaborative shared-folder flow requests the sensitive Drive scope `https://www.googleapis.com/auth/drive`, so Google OAuth verification may be required before public launch. Users must connect Google Drive before creating or joining a shared space. Never put `GOOGLE_CLIENT_SECRET` in frontend files; the current GIS token flow does not require a client secret or an OAuth callback URL.
 
 ---
 
@@ -169,6 +171,30 @@ The client ID can also be entered in the Drive modal under **OAuth Client ID**. 
 - **User-Controlled Cloud Sync**: Drive syncing connects directly from your browser to your own Google account.
 
 ---
+
+## 👥 Collaborative Memory Spaces
+
+The optional collaboration service lets people create a shared memory space, copy an invite link, and join with a display name. Members can upload local photos or import photos from their own Google Drive; new photos and caption changes appear in the shared gallery in real time.
+
+To run collaboration locally:
+
+1. Start the backend from the `backend/` directory with `npm install` and `npm start`.
+2. Serve the root folder over HTTP and open the frontend at `http://localhost:3000`.
+3. Open **Drive Sync** and connect Google Drive.
+4. Open **Lobbies**, join as a guest, create a shared Drive space, and copy its invite link.
+5. Share the link. A new participant enters a display name, connects Google Drive, and joins the same space.
+
+For production, deploy the backend separately, set `FRONTEND_ORIGIN` to the exact frontend origin, and define `window.MEMOIRE_API_BASE` before `collaborative.js` loads:
+
+```html
+<script>window.MEMOIRE_API_BASE = 'https://api.example.com';</script>
+```
+
+The collaboration backend currently stores compressed photo data in SQLite. Use durable persistent storage before relying on it for irreplaceable photos, especially on ephemeral platforms such as Cloud Run.
+
+### Backend-free Drive Spaces
+
+You can use collaborative spaces without running the Mémoire backend. Open **Lobbies**, connect Google Drive, and create a shared Drive space. Mémoire creates a `?driveFolder=...` link that can be shared with collaborators. Each collaborator connects Google Drive, and photos are read from and uploaded directly to that folder. This mode uses Google Drive permissions and refreshes the gallery periodically instead of using guest accounts, lobby records, or Socket.IO.
 
 ## 📄 License
 

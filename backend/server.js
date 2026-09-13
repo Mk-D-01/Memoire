@@ -11,10 +11,11 @@ const { setupSocketIO } = require('./socket');
 
 const app = express();
 const server = http.createServer(app);
+const allowedOrigin = process.env.FRONTEND_ORIGIN || '*';
 
 // Enable CORS for frontend client
 app.use(cors({
-  origin: '*',
+  origin: allowedOrigin,
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
@@ -26,7 +27,7 @@ app.use(express.parse ? express.parse({ limit: '50mb' }) : express.json({ limit:
 // Attach Socket.IO
 const io = new Server(server, {
   cors: {
-    origin: '*',
+    origin: allowedOrigin,
     methods: ['GET', 'POST']
   }
 });
