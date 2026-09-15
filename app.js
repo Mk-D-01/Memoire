@@ -193,7 +193,8 @@ async function _doSave() {
   // Save metadata to localStorage (fast, synchronous access on next load)
   try {
     const meta = photos.map(p => ({
-      id: p.id, caption: p.caption, addedAt: p.addedAt, source: p.source,
+      id: p.id, filename: p.filename, caption: p.caption, addedAt: p.addedAt,
+      source: p.source, driveFileId: p.driveFileId, webViewLink: p.webViewLink,
     }));
     localStorage.setItem(LS_META_KEY, JSON.stringify(meta));
   } catch (e) { /* ignore */ }
@@ -205,7 +206,11 @@ async function _doSave() {
       const tx    = idbDb.transaction(IDB_STORE, 'readwrite');
       const store = tx.objectStore(IDB_STORE);
       for (const p of photos) {
-        store.put({ id: p.id, dataUrl: p.dataUrl, caption: p.caption, addedAt: p.addedAt, source: p.source });
+        store.put({
+          id: p.id, dataUrl: p.dataUrl, filename: p.filename, caption: p.caption,
+          addedAt: p.addedAt, source: p.source, driveFileId: p.driveFileId,
+          webViewLink: p.webViewLink,
+        });
       }
       await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
     } catch (e) { /* ignore */ }
@@ -249,7 +254,11 @@ function loadFromLocalStorage() {
 function saveToLocalStorage() {
   try {
     localStorage.setItem('memoire_photos', JSON.stringify(
-      photos.map(p => ({ id: p.id, dataUrl: p.dataUrl, caption: p.caption, addedAt: p.addedAt }))
+      photos.map(p => ({
+        id: p.id, dataUrl: p.dataUrl, filename: p.filename, caption: p.caption,
+        addedAt: p.addedAt, source: p.source, driveFileId: p.driveFileId,
+        webViewLink: p.webViewLink,
+      }))
     ));
   } catch (e) { /* quota exceeded — ignore */ }
 }
@@ -565,6 +574,7 @@ async function processFiles(files) {
         dataUrl: result.value,
         caption: generateAutoCaption(file, Date.now()),
         addedAt: Date.now(),
+        filename: file.name,
       });
       loaded++;
     }
@@ -580,7 +590,7 @@ async function processFiles(files) {
     if (!inSharedDriveSpace && typeof DriveSync !== 'undefined' && DriveSync.isSignedIn) {
       const newlyAdded = photos.slice(-loaded);
       for (const item of newlyAdded) {
-        DriveSync.uploadPhotoToDrive(item.dataUrl, item.caption || 'memory.jpg', item.caption)
+        DriveSync.uploadPhotoToDrive(item.dataUrl, item.filename || `${item.caption || 'memory'}.jpg`, item.caption)
           .then(driveRes => {
             item.driveFileId = driveRes.driveFileId;
             item.webViewLink = driveRes.webViewLink;
@@ -1002,7 +1012,12 @@ function spawnAmbientParticles() {
 function initDriveUI() {
   // Initialize DriveSync if available
   if (typeof DriveSync !== 'undefined') {
-    DriveSync.init();
+    DriveSync.init().then(() => {
+      if (DriveSync.isSignedIn
+        && !(typeof CollabEngine !== 'undefined' && CollabEngine.state.driveOnly)) {
+        syncDriveFolderPhotos({ notify: false }).catch(err => console.warn('Drive restore error:', err));
+      }
+    }).catch(err => console.warn('Drive initialization error:', err));
 
     const btnDriveSignInText = document.getElementById('btnDriveSignInText');
     const btnDriveFolderFetch = document.getElementById('btnDriveFolderFetch');
@@ -1034,8 +1049,10 @@ function initDriveUI() {
           DriveSync.signIn(async () => {
             showToast('☁️ Connected to Google Drive!');
               if (typeof CollabEngine !== 'undefined' && CollabEngine.state.activeDriveFolderId) {
-                await CollabEngine.fetchLobbyPhotos(CollabEngine.state.activeLobby.id);
-              }
+              await CollabEngine.fetchLobbyPhotos(CollabEngine.state.activeLobby.id);
+            } else {
+              await syncDriveFolderPhotos();
+            }
             renderUI();
           });
         }
@@ -1047,25 +1064,7 @@ function initDriveUI() {
         btnDriveFolderFetch.disabled = true;
         btnDriveFolderFetch.textContent = '⏳ Fetching...';
         try {
-          const drivePhotos = await DriveSync.fetchFolderPhotos();
-          if (drivePhotos && drivePhotos.length > 0) {
-            let addedCount = 0;
-            drivePhotos.forEach(dp => {
-              if (!photos.some(p => p.id === dp.id || (p.driveFileId && p.driveFileId === dp.driveFileId))) {
-                photos.push(dp);
-                addedCount++;
-              }
-            });
-            if (addedCount > 0) {
-              saveToStorage();
-              renderUI();
-              showToast(`📁 ${addedCount} photo(s) imported from 'Mémoire Shared Photos' folder!`);
-            } else {
-              showToast('✦ All photos from your Drive folder are already in Mémoire');
-            }
-          } else {
-            showToast('ℹ️ No photos found in your Google Drive folder yet');
-          }
+          await syncDriveFolderPhotos();
         } catch (err) {
           showToast(`❌ ${err.message}`);
         } finally {
@@ -1224,9 +1223,10 @@ async function importSingleFile(fileId, sid, fileName) {
   setDriveStatusItem(sid, 'loading', `Loading "${label}"…`);
   const { dataUrl } = await tryLoadImageUrls(driveImageUrls(fileId));
   photos.push({
-    id     : `drive_${fileId}_${Date.now()}`,
+    id     : `drive_${fileId}`,
+    driveFileId: fileId,
+    filename: fileName || `${fileId}.jpg`,
     dataUrl,
-    filename: fileName || 'memory.jpg',
     caption: generateAutoCaption(fileName || '', Date.now()),
     addedAt: Date.now(),
     source : 'google_drive',
@@ -1345,4 +1345,68 @@ async function handleDriveImport() {
   } else {
     showToast('⚠ No photos imported — check sharing settings & API key');
   }
+}
+
+async function syncDriveFolderPhotos({ notify = true } = {}) {
+  const drivePhotos = await DriveSync.fetchFolderPhotos();
+  if (DriveSync.status === 'error') {
+    throw new Error('Could not read your Mémoire Shared Photos folder');
+  }
+
+  const driveIds = new Set(drivePhotos.map(photo => photo.driveFileId));
+  const driveByName = new Map(
+    drivePhotos
+      .filter(photo => photo.filename)
+      .map(photo => [photo.filename.toLowerCase(), photo])
+  );
+  let importedCount = 0;
+  let matchedCount = 0;
+  let uploadedCount = 0;
+
+  for (const drivePhoto of drivePhotos) {
+    const localPhoto = photos.find(photo =>
+      photo.driveFileId === drivePhoto.driveFileId
+      || (photo.filename && drivePhoto.filename
+        && photo.filename.toLowerCase() === drivePhoto.filename.toLowerCase())
+    );
+    if (localPhoto) {
+      localPhoto.driveFileId = drivePhoto.driveFileId;
+      localPhoto.webViewLink = drivePhoto.webViewLink;
+      matchedCount++;
+    } else {
+      photos.push(drivePhoto);
+      importedCount++;
+    }
+  }
+
+  const missingFromDrive = photos.filter(photo =>
+    photo.source !== 'google_drive'
+    && (!photo.driveFileId || !driveIds.has(photo.driveFileId))
+    && !(photo.filename && driveByName.has(photo.filename.toLowerCase()))
+  );
+  for (const photo of missingFromDrive) {
+    const driveResult = await DriveSync.uploadPhotoToDrive(
+      photo.dataUrl,
+      photo.filename || `${photo.caption || 'memory'}.jpg`,
+      photo.caption
+    );
+    photo.driveFileId = driveResult.driveFileId;
+    photo.webViewLink = driveResult.webViewLink;
+    uploadedCount++;
+  }
+
+  if (importedCount || matchedCount || uploadedCount) {
+    saveToStorage();
+    renderUI();
+  }
+  if (notify) {
+    if (importedCount || uploadedCount) {
+      showToast(`☁️ ${importedCount} imported, ${uploadedCount} uploaded to Drive`);
+    } else if (drivePhotos.length) {
+      showToast('✦ Drive and Mémoire are already in sync');
+    } else {
+      showToast('ℹ️ No photos found in your Google Drive folder yet');
+    }
+  }
+  return { importedCount, matchedCount, uploadedCount };
 }

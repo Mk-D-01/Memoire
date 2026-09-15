@@ -73,6 +73,54 @@ router.post('/guest', async (req, res) => {
   }
 });
 
+// 1b. Exchange a Google Identity Services access token for a collaboration session.
+router.post('/google', async (req, res) => {
+  try {
+    const { accessToken } = req.body;
+    if (!accessToken) {
+      return res.status(400).json({ error: 'Google access token is required' });
+    }
+
+    const profileResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    if (!profileResponse.ok) {
+      return res.status(401).json({ error: 'Google access token is invalid or expired' });
+    }
+
+    const profile = await profileResponse.json();
+    const email = String(profile.email || '').trim().toLowerCase();
+    if (!email || profile.email_verified === false) {
+      return res.status(401).json({ error: 'A verified Google email is required' });
+    }
+
+    const existing = await dbAsync.get(`SELECT * FROM users WHERE email = ?`, [email]);
+    const user = {
+      id: existing?.id || `usr_${crypto.randomBytes(8).toString('hex')}`,
+      email,
+      displayName: profile.name || email.split('@')[0],
+      avatar: profile.picture || null,
+      createdAt: existing?.createdAt || Date.now()
+    };
+
+    if (existing) {
+      await dbAsync.run(`UPDATE users SET displayName = ?, avatar = ? WHERE id = ?`, [user.displayName, user.avatar, user.id]);
+    } else {
+      await dbAsync.run(
+        `INSERT INTO users (id, email, displayName, avatar, createdAt) VALUES (?, ?, ?, ?, ?)`,
+        [user.id, user.email, user.displayName, user.avatar, user.createdAt]
+      );
+    }
+
+    const token = `sess_${crypto.randomBytes(16).toString('hex')}`;
+    sessionTokens.set(token, user);
+    res.json({ token, user });
+  } catch (err) {
+    console.error('Google Auth Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 2. Fetch Active Session
 router.get('/me', verifyAuth, (req, res) => {
   res.json({ user: req.user });

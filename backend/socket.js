@@ -1,4 +1,5 @@
 const { sessionTokens } = require('./auth');
+const { dbAsync } = require('./db');
 
 function setupSocketIO(io) {
   io.on('connection', (socket) => {
@@ -13,8 +14,20 @@ function setupSocketIO(io) {
       }
     });
 
-    socket.on('join_lobby', ({ lobbyId }) => {
+    socket.on('join_lobby', async ({ lobbyId }) => {
       if (!lobbyId) return;
+      if (!currentUser) {
+        socket.emit('auth_error', { error: 'Authenticate before joining a lobby' });
+        return;
+      }
+      const membership = await dbAsync.get(
+        `SELECT id FROM lobby_members WHERE lobbyId = ? AND userId = ?`,
+        [lobbyId, currentUser.id]
+      );
+      if (!membership) {
+        socket.emit('auth_error', { error: 'You are not a member of this lobby' });
+        return;
+      }
       socket.join(lobbyId);
       console.log(`🔌 Socket ${socket.id} joined lobby room: ${lobbyId}`);
       if (currentUser) {
