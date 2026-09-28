@@ -1,20 +1,25 @@
-const { sessionTokens } = require('./auth');
+const { getUserForToken } = require('./auth');
 const { dbAsync } = require('./db');
 
 function setupSocketIO(io) {
   io.on('connection', (socket) => {
     let currentUser = null;
 
-    socket.on('authenticate', ({ token }) => {
-      if (token && sessionTokens.has(token)) {
-        currentUser = sessionTokens.get(token);
+    socket.on('authenticate', async ({ token } = {}) => {
+      try {
+        currentUser = await getUserForToken(token);
+      } catch (err) {
+        socket.emit('auth_error', { error: 'Authentication service unavailable' });
+        return;
+      }
+      if (currentUser) {
         socket.emit('authenticated', { user: currentUser });
       } else {
         socket.emit('auth_error', { error: 'Invalid token' });
       }
     });
 
-    socket.on('join_lobby', async ({ lobbyId }) => {
+    socket.on('join_lobby', async ({ lobbyId } = {}) => {
       if (!lobbyId) return;
       if (!currentUser) {
         socket.emit('auth_error', { error: 'Authenticate before joining a lobby' });
@@ -29,6 +34,7 @@ function setupSocketIO(io) {
         return;
       }
       socket.join(lobbyId);
+      socket.data.lobbyId = lobbyId;
       console.log(`🔌 Socket ${socket.id} joined lobby room: ${lobbyId}`);
       if (currentUser) {
         socket.to(lobbyId).emit('member_joined_room', {
@@ -42,6 +48,7 @@ function setupSocketIO(io) {
     socket.on('leave_lobby', ({ lobbyId }) => {
       if (!lobbyId) return;
       socket.leave(lobbyId);
+      if (socket.data.lobbyId === lobbyId) socket.data.lobbyId = null;
       console.log(`🔌 Socket ${socket.id} left lobby room: ${lobbyId}`);
     });
 

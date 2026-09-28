@@ -4,6 +4,42 @@ const { dbAsync } = require('./db');
 
 const router = express.Router();
 const sessionTokens = new Map(); // token -> user object
+const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS) || 1000 * 60 * 60 * 24 * 30;
+
+async function createSession(user) {
+  const token = `sess_${crypto.randomBytes(32).toString('hex')}`;
+  const now = Date.now();
+  await dbAsync.run(
+    `INSERT INTO sessions (token, userId, expiresAt, createdAt) VALUES (?, ?, ?, ?)`,
+    [token, user.id, now + SESSION_TTL_MS, now]
+  );
+  sessionTokens.set(token, user);
+  return token;
+}
+
+async function getUserForToken(token) {
+  if (!token) return null;
+  const cached = sessionTokens.get(token);
+  if (cached) return cached;
+  const session = await dbAsync.get(
+    `SELECT s.expiresAt, u.* FROM sessions s JOIN users u ON u.id = s.userId WHERE s.token = ?`,
+    [token]
+  );
+  if (!session) return null;
+  if (session.expiresAt <= Date.now()) {
+    await dbAsync.run(`DELETE FROM sessions WHERE token = ?`, [token]);
+    return null;
+  }
+  const user = {
+    id: session.id,
+    email: session.email,
+    displayName: session.displayName,
+    avatar: session.avatar,
+    createdAt: session.createdAt
+  };
+  sessionTokens.set(token, user);
+  return user;
+}
 
 // Auth Verification Middleware
 const verifyAuth = async (req, res, next) => {
@@ -13,7 +49,7 @@ const verifyAuth = async (req, res, next) => {
   }
 
   const token = authHeader.split(' ')[1];
-  const user = sessionTokens.get(token);
+  const user = await getUserForToken(token);
 
   if (!user) {
     return res.status(401).json({ error: 'Session expired or invalid' });
@@ -63,8 +99,7 @@ router.post('/guest', async (req, res) => {
       [user.id, user.email, user.displayName, user.avatar, user.createdAt]
     );
 
-    const token = `sess_${crypto.randomBytes(16).toString('hex')}`;
-    sessionTokens.set(token, user);
+    const token = await createSession(user);
 
     res.json({ token, user });
   } catch (err) {
@@ -112,8 +147,7 @@ router.post('/google', async (req, res) => {
       );
     }
 
-    const token = `sess_${crypto.randomBytes(16).toString('hex')}`;
-    sessionTokens.set(token, user);
+    const token = await createSession(user);
     res.json({ token, user });
   } catch (err) {
     console.error('Google Auth Error:', err);
@@ -127,10 +161,11 @@ router.get('/me', verifyAuth, (req, res) => {
 });
 
 // 3. Logout
-router.post('/signout', verifyAuth, (req, res) => {
+router.post('/signout', verifyAuth, async (req, res) => {
   const token = req.headers.authorization.split(' ')[1];
   sessionTokens.delete(token);
+  await dbAsync.run(`DELETE FROM sessions WHERE token = ?`, [token]);
   res.json({ success: true });
 });
 
-module.exports = { router, verifyAuth, optionalAuth, sessionTokens };
+module.exports = { router, verifyAuth, optionalAuth, sessionTokens, getUserForToken };

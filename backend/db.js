@@ -2,7 +2,8 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 
-const dbPath = path.join(__dirname, 'memoire.db');
+const dbPath = process.env.DB_PATH || path.join(__dirname, 'memoire.db');
+fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 const db = new sqlite3.Database(dbPath);
 
 db.serialize(() => {
@@ -86,6 +87,16 @@ db.serialize(() => {
       defaultRole TEXT DEFAULT 'editor',
       isRevoked INTEGER DEFAULT 0,
       FOREIGN KEY (lobbyId) REFERENCES lobbies(id) ON DELETE CASCADE
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      token TEXT PRIMARY KEY,
+      userId TEXT NOT NULL,
+      expiresAt INTEGER NOT NULL,
+      createdAt INTEGER NOT NULL,
+      FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
     )
   `);
 });

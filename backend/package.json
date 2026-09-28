@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "check": "node --check server.js && node --check auth.js && node --check db.js && node --check lobbies.js && node --check photos.js && node --check socket.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

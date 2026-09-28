@@ -489,7 +489,22 @@ const CollabEngine = {
       this.state.socket.on('connect', () => {
         if (this.state.token) {
           this.state.socket.emit('authenticate', { token: this.state.token });
+        } else if (this.state.activeLobby) {
+          this.state.socket.emit('join_lobby', { lobbyId: this.state.activeLobby.id });
         }
+      });
+
+      this.state.socket.on('authenticated', () => {
+        if (this.state.activeLobby) {
+          this.state.socket.emit('join_lobby', { lobbyId: this.state.activeLobby.id });
+        }
+      });
+
+      this.state.socket.on('connect_error', err => {
+        console.warn('Live collaboration connection failed:', err.message);
+      });
+
+      this.state.socket.on('reconnect', () => {
         if (this.state.activeLobby) {
           this.state.socket.emit('join_lobby', { lobbyId: this.state.activeLobby.id });
         }
@@ -502,8 +517,10 @@ const CollabEngine = {
               id: photo.id,
               dataUrl: photo.dataUrl,
               caption: photo.caption || '',
+              filename: photo.filename,
               uploadedBy: photo.uploaderName || uploadedBy || 'Collaborator',
               uploadedAvatar: photo.uploaderAvatar,
+              driveFileId: photo.driveFileId,
               addedAt: photo.uploadedAt
             });
             if (typeof renderUI === 'function') renderUI();
