@@ -143,19 +143,27 @@ const CollabEngine = {
     if (!this.state.token) {
       throw new Error('Must be signed in to create a lobby');
     }
-    if (typeof DriveSync === 'undefined' || !DriveSync.isSignedIn) {
-      throw new Error('Connect Google Drive first so this space can use a shared Drive folder');
+    let driveFolderId = null;
+    if (typeof DriveSync !== 'undefined' && DriveSync.isSignedIn) {
+      try {
+        const folder = await DriveSync.createSharedFolder(`Mémoire — ${title.trim()}`);
+        driveFolderId = folder.folderId;
+      } catch (dErr) {
+        console.warn('Optional Drive folder sync skipped:', dErr);
+      }
     }
-    const folder = await DriveSync.createSharedFolder(`Mémoire — ${title.trim()}`);
     const res = await fetch(`${API_BASE}/lobbies`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.state.token}`
       },
-      body: JSON.stringify({ title, description, isPublic, driveFolderId: folder.folderId })
+      body: JSON.stringify({ title, description, isPublic, driveFolderId })
     });
-    if (!res.ok) throw new Error('Failed to create lobby');
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || 'Failed to create lobby on server');
+    }
     const data = await res.json();
     this.state.activeInviteToken = data.inviteToken || null;
     await this.loadUserLobbies();
@@ -631,21 +639,46 @@ const CollabEngine = {
     if (!this.state.user) {
       body.innerHTML = `
         <div class="lobby-welcome-box">
-          <h3>☁️ Shared Google Drive Spaces</h3>
-          <p>Create a shared Drive folder or open a shared-space link. No Mémoire backend is required.</p>
-          <div class="lobby-guest-form">
-            <button class="btn btn-primary" id="btnCreateDriveSpace" style="width:100%;">+ Create Shared Drive Space</button>
-            <button class="btn btn-ghost" id="btnOpenDriveSpace" style="width:100%; margin-top:10px;">Open Drive Folder Link</button>
+          <h3>👥 Real-Time Memory Spaces</h3>
+          <p>Collaborate in real-time with friends and family on a shared memory collage.</p>
+          <div class="guest-login-wrap" style="margin-top:16px;">
+            <label style="font-size:0.8rem; color:var(--text-secondary); display:block; margin-bottom:6px;">Join as a Collaborator:</label>
+            <div style="display:flex; gap:8px;">
+              <input id="guestNameInput" class="captions-search-input" placeholder="Your name (e.g., Maya)" style="flex:1;" />
+              <button class="btn btn-primary" id="btnGuestLogin" style="white-space:nowrap;">Enter Space ✦</button>
+            </div>
+          </div>
+          <div style="text-align:center; margin: 18px 0 14px; color:var(--text-muted); font-size:0.8rem;">— OR USE GOOGLE DRIVE —</div>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <button class="btn btn-ghost" id="btnCreateDriveSpace" style="width:100%;">☁️ Create Shared Google Drive Space</button>
+            <button class="btn btn-ghost" id="btnOpenDriveSpace" style="width:100%;">📁 Open Drive Folder Link</button>
           </div>
         </div>
       `;
       setTimeout(() => {
+        const guestInput = document.getElementById('guestNameInput');
+        const guestBtn = document.getElementById('btnGuestLogin');
+        const doGuestLogin = async () => {
+          const name = guestInput?.value?.trim();
+          if (!name) {
+            if (typeof showToast === 'function') showToast('Please enter your name');
+            guestInput?.focus();
+            return;
+          }
+          try {
+            await this.loginAsGuest(name);
+          } catch (e) {
+            console.error(e);
+          }
+        };
+        guestBtn?.addEventListener('click', doGuestLogin);
+        guestInput?.addEventListener('keydown', e => { if (e.key === 'Enter') doGuestLogin(); });
         document.getElementById('btnCreateDriveSpace')?.addEventListener('click', () => this.createDriveSpace());
         document.getElementById('btnOpenDriveSpace')?.addEventListener('click', async () => {
           const input = prompt('Paste the Google Drive folder link or folder ID:');
           const match = input?.match(/(?:folders\/|id=)([a-zA-Z0-9_-]{10,})/) || input?.match(/^([a-zA-Z0-9_-]{10,})$/);
           if (match) await this.activateDriveSpace(match[1], true);
-          else if (input) showToast('That is not a valid Google Drive folder link.');
+          else if (input && typeof showToast === 'function') showToast('That is not a valid Google Drive folder link.');
         });
       }, 50);
       return;
@@ -653,43 +686,50 @@ const CollabEngine = {
 
     let lobbiesHtml = '';
     if (this.state.lobbies.length === 0) {
-      lobbiesHtml = `<div class="captions-empty-msg">You haven't joined any lobbies yet. Create one below!</div>`;
+      lobbiesHtml = `<div class="captions-empty-msg" style="padding:20px 0;">You haven't joined any shared spaces yet. Create your first memory lobby below!</div>`;
     } else {
-      lobbiesHtml = this.state.lobbies.map(l => `
-        <div class="caption-row" style="margin-bottom:10px;">
-          <div class="caption-row-info lobby-row-info">
-            <div class="caption-row-num"><strong>${this.escapeHtml(l.title)}</strong> (${l.photoCount || 0} photos)</div>
-            <div class="caption-row-text">${this.escapeHtml(l.description || 'Shared space')}</div>
+      lobbiesHtml = this.state.lobbies.map(l => {
+        const isActive = this.state.activeLobby?.id === l.id;
+        return `
+          <div class="caption-row lobby-row ${isActive ? 'active-lobby-row' : ''}" style="margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
+            <div class="caption-row-info lobby-row-info" style="flex:1;">
+              <div class="caption-row-num"><strong>${this.escapeHtml(l.title)}</strong> <span style="font-size:0.75rem; color:var(--text-muted);">(${l.photoCount || 0} photos)</span> ${isActive ? '<span class="active-badge">● Active</span>' : ''}</div>
+              <div class="caption-row-text" style="font-size:0.8rem; color:var(--text-secondary);">${this.escapeHtml(l.description || 'Shared collaborative space')}</div>
+            </div>
+            <button class="btn btn-sm ${isActive ? 'btn-primary' : 'btn-ghost'} btn-switch-lobby" data-id="${l.id}">
+              ${isActive ? 'Active ✓' : 'Open ↗'}
+            </button>
           </div>
-          <button class="btn btn-sm btn-ghost btn-switch-lobby" data-id="${l.id}">Open ↗</button>
-        </div>
-      `).join('');
+        `;
+      }).join('');
     }
 
     body.innerHTML = `
-      <div class="lobby-user-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-        <div>Signed in as <strong>${this.state.user.displayName}</strong></div>
+      <div class="lobby-user-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid var(--border);">
+        <div>Signed in as <strong style="color:var(--accent-primary);">${this.escapeHtml(this.state.user.displayName)}</strong></div>
         <button class="btn btn-sm btn-ghost" id="btnCollabLogout">Sign Out</button>
       </div>
       <div style="margin-bottom:16px;">
-        <button class="btn btn-primary" id="btnCreateLobbyPrompt" style="width:100%;">+ Create Shared Drive Space</button>
+        <button class="btn btn-primary" id="btnCreateLobbyPrompt" style="width:100%;">+ Create New Shared Space</button>
       </div>
       ${this.state.isCollaborative && this.state.activeInviteToken ? `
         <div class="lobby-share-panel">
           <div>
-            <strong>Share this memory space</strong>
-            <p>Anyone with this link can join as an editor and add photos.</p>
+            <strong style="color:var(--accent-gold);">🔗 Invite Friends to "${this.escapeHtml(this.state.activeLobby?.title || 'This Space')}"</strong>
+            <p style="font-size:0.78rem; color:var(--text-secondary); margin:4px 0 8px;">Anyone with this link can view and add memories to this space.</p>
           </div>
           <div class="lobby-share-row">
             <input id="lobbyShareUrl" type="text" value="${this.escapeHtml(this.getShareUrl())}" readonly aria-label="Lobby join link" />
             <button class="btn btn-sm btn-primary" id="btnCopyLobbyLink" type="button">Copy link</button>
           </div>
         </div>
+      ` : ''}
+      ${this.state.isCollaborative ? `
         <div style="margin-bottom:16px;">
           <button class="btn btn-ghost" id="btnReturnPersonal" style="width:100%;">📖 Return to Personal Memory Book</button>
         </div>
       ` : ''}
-      <h4>Your Lobbies</h4>
+      <h4 style="margin:16px 0 8px; font-family:var(--font-display); font-size:1.05rem;">Your Shared Spaces</h4>
       <div class="lobby-list">${lobbiesHtml}</div>
     `;
 
@@ -701,13 +741,15 @@ const CollabEngine = {
         this.closeLobbyModal();
       });
       document.getElementById('btnCreateLobbyPrompt')?.addEventListener('click', async () => {
-        const title = prompt('Lobby Title (e.g., Summer Trip 2026):');
-        if (!title) return;
+        const title = prompt('Space Title (e.g., Goa Trip 2026):');
+        if (!title || !title.trim()) return;
         const desc = prompt('Description (optional):', 'Our shared memories');
         try {
-          await this.createLobby(title, desc || '');
+          await this.createLobby(title.trim(), desc ? desc.trim() : '');
           this.closeLobbyModal();
-        } catch(e) { alert(e.message); }
+        } catch(e) {
+          alert(e.message);
+        }
       });
       document.querySelectorAll('.btn-switch-lobby').forEach(b => {
         b.addEventListener('click', () => {
@@ -727,8 +769,61 @@ const CollabEngine = {
       .replaceAll("'", '&#039;');
   },
 
-  updateHeaderProfileUI() {},
-  updateLobbyBannerUI() {}
+  updateHeaderProfileUI() {
+    const btnLobby = document.getElementById('btnLobby');
+    if (!btnLobby) return;
+    if (this.state.user) {
+      btnLobby.innerHTML = `👥 Space (${this.escapeHtml(this.state.user.displayName.split(' ')[0])})`;
+      btnLobby.classList.add('active-user-btn');
+    } else {
+      btnLobby.innerHTML = `👥 Lobbies`;
+      btnLobby.classList.remove('active-user-btn');
+    }
+  },
+
+  updateLobbyBannerUI() {
+    let banner = document.getElementById('collabActiveBanner');
+    if (this.state.isCollaborative && this.state.activeLobby) {
+      if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'collabActiveBanner';
+        banner.className = 'collab-banner';
+        const header = document.querySelector('.header');
+        if (header) {
+          header.insertAdjacentElement('afterend', banner);
+        } else {
+          document.body.insertAdjacentElement('afterbegin', banner);
+        }
+      }
+      banner.innerHTML = `
+        <div class="collab-banner-inner">
+          <div class="collab-banner-title">
+            <span class="collab-pulse-dot"></span>
+            <span>Live Space: <strong>${this.escapeHtml(this.state.activeLobby.title)}</strong></span>
+          </div>
+          <div class="collab-banner-actions">
+            <button class="btn btn-sm btn-primary" id="btnBannerInvite" type="button">🔗 Share Space</button>
+            <button class="btn btn-sm btn-ghost" id="btnBannerPersonal" type="button">📖 Exit to Personal Book</button>
+          </div>
+        </div>
+      `;
+      banner.style.display = 'block';
+      setTimeout(() => {
+        document.getElementById('btnBannerInvite')?.addEventListener('click', () => {
+          if (this.state.activeInviteToken || this.state.driveOnly) {
+            this.copyShareUrl();
+          } else {
+            this.openLobbyModal();
+          }
+        });
+        document.getElementById('btnBannerPersonal')?.addEventListener('click', () => {
+          this.switchToPersonalMode();
+        });
+      }, 50);
+    } else if (banner) {
+      banner.style.display = 'none';
+    }
+  }
 };
 
 document.addEventListener('DOMContentLoaded', () => CollabEngine.init());

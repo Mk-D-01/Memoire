@@ -2075,3 +2075,86 @@ body {
   font-size: 2.5rem;
 }
 
+/* ── Live Collaboration Banner ── */
+.collab-banner {
+  background: linear-gradient(90deg, rgba(192, 132, 252, 0.15) 0%, rgba(240, 171, 252, 0.08) 50%, rgba(14, 12, 21, 0.8) 100%);
+  border-bottom: 1px solid rgba(192, 132, 252, 0.3);
+  backdrop-filter: blur(12px);
+  padding: 8px 1.5rem;
+  position: sticky;
+  top: 72px;
+  z-index: 90;
+  animation: cardIn 0.3s ease-out;
+}
+
+.collab-banner-inner {
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.collab-banner-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.88rem;
+  color: var(--text-primary);
+}
+
+.collab-banner-title strong {
+  color: var(--accent-secondary);
+}
+
+.collab-pulse-dot {
+  width: 9px;
+  height: 9px;
+  background-color: #34d399;
+  border-radius: 50%;
+  box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.7);
+  animation: pulseDot 1.8s infinite;
+  display: inline-block;
+}
+
+@keyframes pulseDot {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 7px rgba(52, 211, 153, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+}
+
+.collab-banner-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  min-height: 28px;
+}
+
+.active-badge {
+  display: inline-block;
+  background: rgba(52, 211, 153, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.3);
+  padding: 2px 7px;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  margin-left: 6px;
+}
+
+.active-user-btn {
+  border-color: rgba(192, 132, 252, 0.4) !important;
+  color: var(--accent-secondary) !important;
+}
+
+.active-lobby-row {
+  border-left: 3px solid var(--accent-primary) !important;
+  background: rgba(192, 132, 252, 0.08) !important;
+}
+
